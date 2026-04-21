@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 type Hotspot = {
   id: string;
@@ -13,14 +13,57 @@ type Hotspot = {
 
 type ParkingMapProps = {
   hotspots: Hotspot[];
+  routeStops: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    vehicleId: string | null;
+  }>;
 };
 
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
+const MAX_ROUTE_STOPS = 80;
+const OSRM_CHUNK_SIZE = 25;
 
-export default function ParkingMap({ hotspots }: ParkingMapProps) {
+function sampleStops<T>(stops: T[], maxCount: number): T[] {
+  if (stops.length <= maxCount) {
+    return stops;
+  }
+
+  const sampled: T[] = [];
+  for (let index = 0; index < maxCount; index += 1) {
+    const sourceIndex = Math.round((index * (stops.length - 1)) / (maxCount - 1));
+    sampled.push(stops[sourceIndex]);
+  }
+
+  return sampled;
+}
+
+function chunkStops<T>(stops: T[], chunkSize: number): T[][] {
+  if (stops.length <= chunkSize) {
+    return [stops];
+  }
+
+  const chunks: T[][] = [];
+  let startIndex = 0;
+
+  while (startIndex < stops.length) {
+    const nextChunk = stops.slice(startIndex, startIndex + chunkSize);
+    chunks.push(nextChunk);
+    if (startIndex + chunkSize >= stops.length) {
+      break;
+    }
+    startIndex += chunkSize - 1;
+  }
+
+  return chunks;
+}
+
+export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
+  const routeStatusRef = useRef<any>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -54,6 +97,10 @@ export default function ParkingMap({ hotspots }: ParkingMapProps) {
         layerRef.current = L.layerGroup().addTo(mapRef.current);
       }
 
+      if (routeStatusRef.current) {
+        routeStatusRef.current.textContent = '';
+      }
+
       if (hotspots.length === 0) {
         mapRef.current.setView(DEFAULT_CENTER, 9);
         mapRef.current.invalidateSize();
@@ -80,6 +127,66 @@ export default function ParkingMap({ hotspots }: ParkingMapProps) {
             `<strong>Parking hotspot</strong><br/>Stops: ${hotspot.count}<br/>Vehicles: ${hotspot.vehicleCount}<br/>Avg speed: ${speedSummary}<br/>Vehicle ids: ${vehicleSummary}`
           )
           .addTo(layerRef.current);
+      }
+
+      const preparedStops = sampleStops(routeStops, MAX_ROUTE_STOPS);
+
+      if (preparedStops.length >= 2) {
+        try {
+          const routeChunks = chunkStops(preparedStops, OSRM_CHUNK_SIZE);
+          const routeCoordinates: Array<[number, number]> = [];
+
+          for (const chunk of routeChunks) {
+            const coordinateString = chunk
+              .map((stop) => `${stop.longitude},${stop.latitude}`)
+              .join(';');
+
+            const response = await fetch(
+              `https://router.project-osrm.org/route/v1/driving/${coordinateString}?overview=full&geometries=geojson`
+            );
+
+            if (!response.ok) {
+              throw new Error('OSRM request failed');
+            }
+
+            const payload = await response.json();
+            const geometry = payload.routes?.[0]?.geometry?.coordinates;
+
+            if (!Array.isArray(geometry) || geometry.length === 0) {
+              continue;
+            }
+
+            for (const coordinate of geometry) {
+              routeCoordinates.push([coordinate[1], coordinate[0]]);
+            }
+          }
+
+          if (routeCoordinates.length >= 2) {
+            L.polyline(routeCoordinates, {
+              color: '#2563eb',
+              weight: 4,
+              opacity: 0.75,
+            }).addTo(layerRef.current);
+          }
+
+          if (routeStops.length > MAX_ROUTE_STOPS && routeStatusRef.current) {
+            routeStatusRef.current.textContent = `Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`;
+          }
+        } catch {
+          const fallbackLine = preparedStops.map((stop) => [stop.latitude, stop.longitude] as [number, number]);
+          if (fallbackLine.length >= 2) {
+            L.polyline(fallbackLine, {
+              color: '#2563eb',
+              weight: 3,
+              opacity: 0.6,
+              dashArray: '8 8',
+            }).addTo(layerRef.current);
+          }
+
+          if (routeStatusRef.current) {
+            routeStatusRef.current.textContent = 'Routing service was unavailable, so the map is showing a straight-line path between stops.';
+          }
+        }
       }
 
       if (hotspots.length === 1) {
@@ -112,6 +219,7 @@ export default function ParkingMap({ hotspots }: ParkingMapProps) {
   return (
     <View style={styles.shell}>
       <View ref={containerRef} style={styles.map} />
+      <Text ref={routeStatusRef} style={styles.status} />
     </View>
   );
 }
@@ -128,5 +236,18 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
     minHeight: 460,
+  },
+  status: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    color: '#0f172a',
+    fontSize: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    overflow: 'hidden',
   },
 });

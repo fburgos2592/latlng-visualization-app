@@ -16,6 +16,13 @@ type Point = {
   speed: number | null;
 };
 
+type RouteStop = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  vehicleId: string | null;
+};
+
 type Hotspot = {
   id: string;
   latitude: number;
@@ -43,6 +50,7 @@ const LONGITUDE_ALIASES = ['lng', 'lon', 'long', 'longitude', 'vehicle_lng', 've
 const VEHICLE_ID_ALIASES = ['vehicle_id', 'truck_id', 'unit_id', 'vehicle'];
 const SPEED_ALIASES = ['speed', 'mph'];
 const HOTSPOT_PRECISION = 3;
+const ROUTE_PRECISION = 4;
 
 function toNumber(value: unknown): number | null {
   const parsed = Number(String(value ?? '').trim());
@@ -310,6 +318,31 @@ export default function HomeScreen() {
       .sort((left, right) => right.count - left.count);
   }, [points]);
 
+  const routeStops = useMemo(() => {
+    const orderedStops: RouteStop[] = [];
+    let previousKey: string | null = null;
+
+    for (const point of points) {
+      const roundedLat = roundCoordinate(point.latitude, ROUTE_PRECISION);
+      const roundedLng = roundCoordinate(point.longitude, ROUTE_PRECISION);
+      const currentKey = `${roundedLat}:${roundedLng}`;
+
+      if (currentKey === previousKey) {
+        continue;
+      }
+
+      orderedStops.push({
+        id: point.id,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        vehicleId: point.vehicleId,
+      });
+      previousKey = currentKey;
+    }
+
+    return orderedStops;
+  }, [points]);
+
   async function pickCsv() {
     setError('');
 
@@ -415,11 +448,15 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        <ParkingMap hotspots={hotspots} />
+        <ParkingMap hotspots={hotspots} routeStops={routeStops} />
 
         <Text style={styles.mapNote}>
           Hotspots are grouped by nearby coordinates rounded to about 3 decimal places, roughly a
           city block scale. Larger circles mean more repeated stops at that location.
+        </Text>
+        <Text style={styles.mapNote}>
+          The blue route follows the uploaded stop order and is snapped to roads with a public
+          routing service. Consecutive duplicate GPS points are removed before routing.
         </Text>
 
         <View style={styles.boundsRow}>
@@ -447,6 +484,15 @@ export default function HomeScreen() {
         {hotspots.length > 12 ? (
           <Text style={styles.moreText}>Showing first 12 of {hotspots.length} hotspot groups.</Text>
         ) : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Route Summary</Text>
+        <View style={styles.boundsRow}>
+          <Text style={styles.boundsText}>Uploaded points: {points.length}</Text>
+          <Text style={styles.boundsText}>Road-routed stops: {routeStops.length}</Text>
+          <Text style={styles.boundsText}>Hotspot groups: {hotspots.length}</Text>
+        </View>
       </View>
     </ScrollView>
   );
