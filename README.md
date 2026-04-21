@@ -1,50 +1,113 @@
-# Welcome to your Expo app 👋
+# LatLng Visualization App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Web app for exploring truck stop data from CSV or Excel uploads. The app detects latitude and longitude columns, plots repeated stop locations as parking hotspots, and draws an ordered route between stops on top of an OpenStreetMap base layer.
 
-## Get started
+Live site:
 
-1. Install dependencies
+- https://fburgos2592.github.io/latlng-visualization-app/
 
-   ```bash
-   npm install
-   ```
+## What It Does
 
-2. Start the app
+- Uploads `.csv`, `.xls`, or `.xlsx` files directly in the browser.
+- Detects coordinate columns such as `lat/lng`, `latitude/longitude`, and `vehicle_lat/vehicle_lng`.
+- Groups repeated coordinates into parking hotspots so frequent truck stop locations stand out.
+- Draws a route line between uploaded stops.
+- Attempts to snap the route to roads using the public OSRM routing service.
+- Falls back to a straight-line route if the routing service is unavailable.
+- Shows hotspot counts, vehicle counts, and average speed when that data is present.
 
-   ```bash
-   npx expo start
-   ```
+## Supported Upload Format
 
-In the output, you'll find options to open the app in a
+The app is built to handle files like the truck telemetry sample with columns such as:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- `vehicle_lat`
+- `vehicle_lng`
+- `vehicle_id`
+- `speed`
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+It also works with more generic coordinate headers:
 
-## Get a fresh project
+- `lat` / `lng`
+- `latitude` / `longitude`
 
-When you're ready, run:
+Header matching is case-insensitive and tolerant of common naming variants.
+
+## How The Map Works
+
+- Orange circles represent parking hotspots.
+- Larger circles mean more repeated stops at that location.
+- The blue line follows uploaded stop order.
+- When routing succeeds, the blue line follows roads.
+- When routing fails, the line falls back to a dashed straight path.
+
+Hotspots are grouped by nearby coordinates rounded to roughly city-block precision, which helps separate meaningful parking behavior from minor GPS jitter.
+
+## Local Development
+
+If `node` and `npm` are already on your `PATH`:
 
 ```bash
-npm run reset-project
+npm install
+npm run web
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+If you need the Windows-specific path used in this repo session:
 
-## Learn more
+```powershell
+$env:Path = "C:\Program Files\nodejs;" + $env:Path
+Set-Location "C:\Users\FBurgos\Documents\latlng-visualization-app"
+& "C:\Program Files\nodejs\npm.cmd" install
+& "C:\Program Files\nodejs\npm.cmd" run web
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Production Build
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Create the static web bundle:
 
-## Join the community
+```bash
+npm run export:web
+```
 
-Join our community of developers creating universal apps.
+Serve the exported bundle locally:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npm run serve:dist
+```
+
+## Deployment
+
+This project is configured for GitHub Pages.
+
+Deploy the latest static build:
+
+```bash
+npm run deploy
+```
+
+That command:
+
+- exports the web app into `dist`
+- publishes `dist` to the `gh-pages` branch
+
+## Tech Stack
+
+- Expo Router
+- React Native Web
+- Leaflet
+- OpenStreetMap tiles
+- OSRM public routing API
+- Papa Parse
+- SheetJS (`xlsx`)
+
+## Current Limitations
+
+- The route follows upload order, not an explicitly reconstructed trip timeline.
+- Public OSRM routing can rate-limit or fail for large or noisy inputs.
+- Parking detection is still coordinate-based, not dwell-time based.
+
+## Good Next Steps
+
+- Filter to low-speed points only to isolate likely parking events.
+- Split or filter the map by `vehicle_id`.
+- Add dwell-time logic from timestamps like `reading_start` and `reading_finish`.
+- Add date filtering and route playback.

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 type Hotspot = {
@@ -63,7 +63,7 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
-  const routeStatusRef = useRef<any>(null);
+  const [routeStatus, setRouteStatus] = useState('');
 
   useEffect(() => {
     let disposed = false;
@@ -97,9 +97,7 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
         layerRef.current = L.layerGroup().addTo(mapRef.current);
       }
 
-      if (routeStatusRef.current) {
-        routeStatusRef.current.textContent = '';
-      }
+      setRouteStatus('');
 
       if (hotspots.length === 0) {
         mapRef.current.setView(DEFAULT_CENTER, 9);
@@ -132,6 +130,18 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
       const preparedStops = sampleStops(routeStops, MAX_ROUTE_STOPS);
 
       if (preparedStops.length >= 2) {
+        const fallbackLine = preparedStops.map((stop) => [stop.latitude, stop.longitude] as [number, number]);
+        let fallbackPolyline: any = null;
+
+        if (fallbackLine.length >= 2) {
+          fallbackPolyline = L.polyline(fallbackLine, {
+            color: '#2563eb',
+            weight: 3,
+            opacity: 0.55,
+            dashArray: '8 8',
+          }).addTo(layerRef.current);
+        }
+
         try {
           const routeChunks = chunkStops(preparedStops, OSRM_CHUNK_SIZE);
           const routeCoordinates: Array<[number, number]> = [];
@@ -162,30 +172,24 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
           }
 
           if (routeCoordinates.length >= 2) {
+            if (fallbackPolyline) {
+              layerRef.current.removeLayer(fallbackPolyline);
+            }
+
             L.polyline(routeCoordinates, {
               color: '#2563eb',
-              weight: 4,
-              opacity: 0.75,
+              weight: 5,
+              opacity: 0.9,
             }).addTo(layerRef.current);
+
+            setRouteStatus('Blue line is following roads in uploaded stop order.');
           }
 
-          if (routeStops.length > MAX_ROUTE_STOPS && routeStatusRef.current) {
-            routeStatusRef.current.textContent = `Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`;
+          if (routeStops.length > MAX_ROUTE_STOPS) {
+            setRouteStatus(`Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`);
           }
         } catch {
-          const fallbackLine = preparedStops.map((stop) => [stop.latitude, stop.longitude] as [number, number]);
-          if (fallbackLine.length >= 2) {
-            L.polyline(fallbackLine, {
-              color: '#2563eb',
-              weight: 3,
-              opacity: 0.6,
-              dashArray: '8 8',
-            }).addTo(layerRef.current);
-          }
-
-          if (routeStatusRef.current) {
-            routeStatusRef.current.textContent = 'Routing service was unavailable, so the map is showing a straight-line path between stops.';
-          }
+          setRouteStatus('Routing service was unavailable, so the map is showing a straight-line path between stops.');
         }
       }
 
@@ -204,7 +208,7 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
     return () => {
       disposed = true;
     };
-  }, [hotspots]);
+  }, [hotspots, routeStops]);
 
   useEffect(() => {
     return () => {
@@ -219,7 +223,7 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
   return (
     <View style={styles.shell}>
       <View ref={containerRef} style={styles.map} />
-      <Text ref={routeStatusRef} style={styles.status} />
+      {routeStatus ? <Text style={styles.status}>{routeStatus}</Text> : null}
     </View>
   );
 }
