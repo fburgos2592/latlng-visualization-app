@@ -1,60 +1,89 @@
-# LatLng Visualization App
+# Truck Route Intelligence Dashboard
 
-Web app for exploring truck stop data from CSV or Excel uploads. The app detects latitude and longitude columns, plots repeated stop locations as parking hotspots, and draws ordered per-truck routes on top of an OpenStreetMap base layer.
+Interactive web dashboard for operational route analysis. The app ingests truck telemetry files, detects parking hotspots, and renders per-vehicle routes with truck-aware road snapping via a secure backend proxy.
 
-Live site:
+## Live Links
 
-- https://fburgos2592.github.io/latlng-visualization-app/
+- Frontend (GitHub Pages): https://fburgos2592.github.io/latlng-visualization-app/
+- Routing API proxy (Render): https://latlng-visualization-app.onrender.com/
 
-## What It Does
+## Executive Summary
 
-- Uploads `.csv`, `.xls`, or `.xlsx` files directly in the browser.
-- Detects coordinate columns such as `lat/lng`, `latitude/longitude`, and `vehicle_lat/vehicle_lng`.
-- Groups repeated coordinates into parking hotspots so frequent truck stop locations stand out.
-- Draws routes per `vehicle_id`, ordered from oldest to newest stop times.
-- Snaps routes to roads using TomTom truck routing.
-- Applies commercial/truck restrictions with configurable vehicle profile settings (weight, axle, length, width, height).
-- Falls back to a straight-line route if routing is unavailable or no TomTom key is provided.
-- Shows hotspot counts, vehicle counts, and average speed when that data is present.
+This project provides a practical decision-support layer for fleet operations:
 
-## Supported Upload Format
+- Converts raw GPS rows into route intelligence in-browser.
+- Highlights repeat stop behavior (parking hotspots) for route and productivity analysis.
+- Uses truck-aware routing (height/weight/axle constraints) instead of passenger-car defaults.
+- Protects the routing API key behind a backend proxy (no key exposure in browser code).
+- Includes graceful fallback behavior so maps remain usable if upstream routing is unavailable.
 
-The app is built to handle files like the truck telemetry sample with columns such as:
+## Core Capabilities
 
-- `vehicle_lat`
-- `vehicle_lng`
-- `vehicle_id`
-- `speed`
+- Upload support for CSV and Excel files (`.csv`, `.xls`, `.xlsx`).
+- Automatic coordinate detection for common schemas:
+	- `lat` / `lng`
+	- `latitude` / `longitude`
+	- `vehicle_lat` / `vehicle_lng`
+- Optional field inference for:
+	- `vehicle_id`
+	- `speed`
+	- multiple timestamp aliases (`reading_start`, `reading_finish`, `timestamp`, etc.)
+- Per-vehicle route reconstruction ordered by event time (or row order fallback).
+- Hotspot clustering to reduce GPS jitter and surface recurring stop locations.
+- Truck profile controls for routing constraints:
+	- vehicle weight
+	- axle weight
+	- number of axles
+	- length, width, height
+- On-map routing mode indicator:
+	- `Routing: API`
+	- `Routing: Fallback`
+	- `Routing: Mixed`
 
-It also works with more generic coordinate headers:
+## Architecture
 
-- `lat` / `lng`
-- `latitude` / `longitude`
+### Frontend (static)
 
-Header matching is case-insensitive and tolerant of common naming variants.
+- Hosted on GitHub Pages.
+- Built with Expo Router + React Native Web + Leaflet.
+- Renders maps using OpenStreetMap tiles.
+- Calls backend proxy endpoint for routing.
 
-## How The Map Works
+### Backend proxy (server)
 
-- Orange circles represent parking hotspots.
-- Larger circles mean more repeated stops at that location.
-- Route lines are per truck and colorized from red (start) to green (end).
-- When routing succeeds, route lines follow truck-allowed roads.
-- When routing fails, route lines fall back to dashed straight paths.
+- Hosted on Render (Node + Express).
+- Endpoint: `GET /route`
+- Accepts query params such as:
+	- `waypoints` (`lat,lng:lat,lng:...`)
+	- `travelMode`, `vehicleWeight`, `vehicleHeight`, etc.
+- Injects `TOMTOM_API_KEY` from server environment.
+- Proxies requests to TomTom Routing API and returns JSON payloads to frontend.
 
-Hotspots are grouped by nearby coordinates rounded to roughly city-block precision, which helps separate meaningful parking behavior from minor GPS jitter.
+## Security Posture
+
+- API key is server-side only (`TOMTOM_API_KEY` on Render).
+- No sensitive key in frontend bundle.
+- Browser traffic goes to Render proxy, not directly to TomTom with embedded credentials.
+- `.env` remains local/private and is not committed.
+
+## Routing Behavior
+
+- Primary path: truck-aware route geometry from proxy/API.
+- Fallback path: dashed straight-line segments per vehicle when routing fails.
+- Mixed mode: some vehicles routed via API, others shown as fallback.
+
+This ensures map continuity even during API cold starts or temporary network issues.
 
 ## Local Development
 
-Before testing truck-aware routing, create a TomTom API key at https://developer.tomtom.com and paste it into the app's TomTom API key field.
-
-If `node` and `npm` are already on your `PATH`:
+### Frontend
 
 ```bash
 npm install
 npm run web
 ```
 
-If you need the Windows-specific path used in this repo session:
+Windows session variant used in this repo:
 
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
@@ -63,54 +92,66 @@ Set-Location "C:\Users\FBurgos\Documents\latlng-visualization-app"
 & "C:\Program Files\nodejs\npm.cmd" run web
 ```
 
-## Production Build
+### Backend proxy
 
-Create the static web bundle:
+```bash
+cd server
+npm install
+npm start
+```
+
+Create `server/.env`:
+
+```env
+TOMTOM_API_KEY=your_key_here
+PORT=3001
+```
+
+## Build and Deploy
+
+### Frontend static export
 
 ```bash
 npm run export:web
 ```
 
-Serve the exported bundle locally:
-
-```bash
-npm run serve:dist
-```
-
-## Deployment
-
-This project is configured for GitHub Pages.
-
-Deploy the latest static build:
+### Publish to GitHub Pages
 
 ```bash
 npm run deploy
 ```
 
-That command:
+`deploy` runs `predeploy` (`expo export -p web`) and publishes `dist` to `gh-pages`.
 
-- exports the web app into `dist`
-- publishes `dist` to the `gh-pages` branch
+### Backend deployment (Render)
+
+- Service type: Web Service
+- Root directory: `server`
+- Build command: `npm install`
+- Start command: `npm start`
+- Environment variable: `TOMTOM_API_KEY`
 
 ## Tech Stack
 
 - Expo Router
 - React Native Web
 - Leaflet
-- OpenStreetMap tiles
-- TomTom Routing API (truck travel mode)
+- OpenStreetMap
+- Express + CORS + dotenv
+- TomTom Routing API (truck mode)
 - Papa Parse
 - SheetJS (`xlsx`)
 
-## Current Limitations
+## Known Constraints
 
-- TomTom routing requires an API key and internet access.
-- Very large stop sets may be sampled for performance and API limits.
-- Parking detection is still coordinate-based, not dwell-time based.
+- Render free tier may cold-start after idle periods.
+- Very large stop sets are sampled to stay responsive and within routing limits.
+- Hotspot detection is coordinate-cluster based; dwell-time heuristics are not yet applied.
 
-## Good Next Steps
+## Next Iteration Ideas
 
-- Filter to low-speed points only to isolate likely parking events.
-- Split or filter the map by `vehicle_id`.
-- Add dwell-time logic from timestamps like `reading_start` and `reading_finish`.
-- Add date filtering and route playback.
+- Add date/time filters and route playback.
+- Add dwell-time-based parking confidence scoring.
+- Add per-vehicle toggle and compare mode.
+- Persist user-selected truck profiles.
+- Add optional analytics export for downstream BI.
