@@ -2,6 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
 import React, { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as XLSX from 'xlsx';
 
 type CsvRow = Record<string, unknown>;
 
@@ -18,29 +19,74 @@ type Bounds = {
   maxLng: number;
 };
 
+type CoordinateKeys = {
+  latitudeKey: string | null;
+  longitudeKey: string | null;
+};
+
+const LATITUDE_ALIASES = ['lat', 'latitude', 'vehicle_lat', 'vehicle_latitude'];
+const LONGITUDE_ALIASES = ['lng', 'lon', 'long', 'longitude', 'vehicle_lng', 'vehicle_lon', 'vehicle_longitude'];
+
 function toNumber(value: unknown): number | null {
   const parsed = Number(String(value ?? '').trim());
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function getField(row: CsvRow, ...keys: string[]): unknown {
-  const normalizedEntries = Object.entries(row).reduce<Record<string, unknown>>((acc, [key, value]) => {
-    acc[key.toLowerCase()] = value;
-    return acc;
-  }, {});
+function normalizeKey(key: string): string {
+  return key.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
 
-  for (const key of keys) {
-    if (row[key] !== undefined) {
-      return row[key];
-    }
+function pickBestKey(candidates: string[], aliases: string[]): string | null {
+  if (candidates.length === 0) {
+    return null;
+  }
 
-    const normalizedMatch = normalizedEntries[key.toLowerCase()];
-    if (normalizedMatch !== undefined) {
-      return normalizedMatch;
+  const normalizedLookup = new Map(candidates.map((candidate) => [normalizeKey(candidate), candidate]));
+
+  for (const alias of aliases) {
+    const match = normalizedLookup.get(alias);
+    if (match) {
+      return match;
     }
   }
 
-  return undefined;
+  return candidates[0] ?? null;
+}
+
+function detectCoordinateKeys(rows: CsvRow[]): CoordinateKeys {
+  const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+
+  const latitudeCandidates = allKeys.filter((key) => {
+    const normalized = normalizeKey(key);
+    return normalized.includes('lat');
+  });
+
+  const longitudeCandidates = allKeys.filter((key) => {
+    const normalized = normalizeKey(key);
+    return normalized.includes('lng') || normalized.includes('lon') || normalized.includes('longitude');
+  });
+
+  return {
+    latitudeKey: pickBestKey(latitudeCandidates, LATITUDE_ALIASES),
+    longitudeKey: pickBestKey(longitudeCandidates, LONGITUDE_ALIASES),
+  };
+}
+
+function getField(row: CsvRow, key: string | null): unknown {
+  if (!key) {
+    return undefined;
+  }
+
+  if (row[key] !== undefined) {
+    return row[key];
+  }
+
+  const normalizedEntries = Object.entries(row).reduce<Record<string, unknown>>((acc, [entryKey, value]) => {
+    acc[normalizeKey(entryKey)] = value;
+    return acc;
+  }, {});
+
+  return normalizedEntries[normalizeKey(key)];
 }
 
 function getBounds(points: Point[]): Bounds {
@@ -89,24 +135,65 @@ async function readCsvText(asset: DocumentPicker.DocumentPickerAsset): Promise<s
   return response.text();
 }
 
+async function readBinaryData(asset: DocumentPicker.DocumentPickerAsset): Promise<ArrayBuffer> {
+  if ('file' in asset && asset.file) {
+    return asset.file.arrayBuffer();
+  }
+
+  const response = await fetch(asset.uri);
+  return response.arrayBuffer();
+}
+
+function parseCsvRows(csvText: string): CsvRow[] {
+  const parsed = Papa.parse<CsvRow>(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: false,
+  });
+
+  const meaningfulErrors = parsed.errors.filter((entry) => entry.code !== 'UndetectableDelimiter');
+  if (meaningfulErrors.length > 0) {
+    throw new Error(meaningfulErrors[0].message || 'CSV parse error');
+  }
+
+  return parsed.data ?? [];
+}
+
+function parseWorkbookRows(buffer: ArrayBuffer): CsvRow[] {
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+
+  if (!firstSheetName) {
+    return [];
+  }
+
+  const sheet = workbook.Sheets[firstSheetName];
+  return XLSX.utils.sheet_to_json<CsvRow>(sheet, { defval: '' });
+}
+
+function isSpreadsheetUpload(asset: DocumentPicker.DocumentPickerAsset): boolean {
+  const fileName = asset.name?.toLowerCase() ?? '';
+  const mimeType = asset.mimeType?.toLowerCase() ?? '';
+
+  return (
+    fileName.endsWith('.xlsx') ||
+    fileName.endsWith('.xls') ||
+    mimeType.includes('spreadsheetml') ||
+    mimeType === 'application/vnd.ms-excel'
+  );
+}
+
 export default function HomeScreen() {
   const [rows, setRows] = useState<CsvRow[]>([]);
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
+  const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
 
   const points = useMemo(() => {
     return rows
       .map((row, index) => {
-        const latitude =
-          toNumber(getField(row, 'lat', 'latitude')) ??
-          toNumber((row as { lat?: unknown }).lat) ??
-          toNumber((row as { latitude?: unknown }).latitude);
-
-        const longitude =
-          toNumber(getField(row, 'lng', 'lon', 'longitude')) ??
-          toNumber((row as { lng?: unknown }).lng) ??
-          toNumber((row as { lon?: unknown }).lon) ??
-          toNumber((row as { longitude?: unknown }).longitude);
+        const latitude = toNumber(getField(row, coordinateKeys.latitudeKey));
+        const longitude = toNumber(getField(row, coordinateKeys.longitudeKey));
 
         if (latitude == null || longitude == null) {
           return null;
@@ -119,7 +206,7 @@ export default function HomeScreen() {
         } satisfies Point;
       })
       .filter((point): point is Point => point !== null);
-  }, [rows]);
+  }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, rows]);
 
   const invalidRowCount = rows.length - points.length;
   const bounds = useMemo(() => getBounds(points), [points]);
@@ -140,7 +227,12 @@ export default function HomeScreen() {
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/vnd.ms-excel'],
+        type: [
+          'text/csv',
+          'text/comma-separated-values',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ],
         copyToCacheDirectory: true,
         multiple: false,
       });
@@ -155,23 +247,26 @@ export default function HomeScreen() {
         return;
       }
 
-      const csvText = await readCsvText(asset);
-      const parsed = Papa.parse<CsvRow>(csvText, {
-        header: true,
-        skipEmptyLines: true,
-        dynamicTyping: false,
-      });
+      const parsedRows = isSpreadsheetUpload(asset)
+        ? parseWorkbookRows(await readBinaryData(asset))
+        : parseCsvRows(await readCsvText(asset));
 
-      const meaningfulErrors = parsed.errors.filter((entry) => entry.code !== 'UndetectableDelimiter');
-      if (meaningfulErrors.length > 0) {
-        setError(meaningfulErrors[0].message || 'CSV parse error');
+      const detectedKeys = detectCoordinateKeys(parsedRows);
+
+      setFileName(asset.name ?? 'Uploaded CSV');
+      setRows(parsedRows);
+
+      if (parsedRows.length > 0 && (!detectedKeys.latitudeKey || !detectedKeys.longitudeKey)) {
+        setError('Could not find coordinate columns. Expected headers like lat/lng, latitude/longitude, or vehicle_lat/vehicle_lng.');
         return;
       }
 
-      setFileName(asset.name ?? 'Uploaded CSV');
-      setRows(parsed.data ?? []);
-    } catch {
-      setError('Unable to open or parse that CSV file.');
+      setError('');
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : 'Unable to open or parse that file.';
+      setError(message);
+      setRows([]);
+      setFileName('');
     }
   }
 
@@ -206,14 +301,20 @@ export default function HomeScreen() {
         </View>
 
         <Text style={styles.helpText}>
-          Expected columns: <Text style={styles.helpStrong}>lat,lng</Text> or{' '}
-          <Text style={styles.helpStrong}>latitude,longitude</Text>. Header matching is
-          case-insensitive.
+          Expected columns: <Text style={styles.helpStrong}>lat,lng</Text>,{' '}
+          <Text style={styles.helpStrong}>latitude,longitude</Text>, or{' '}
+          <Text style={styles.helpStrong}>vehicle_lat,vehicle_lng</Text>. CSV and Excel uploads are supported.
         </Text>
         <Text style={styles.helpText}>
           Best fit for GitHub Pages: {Platform.OS === 'web' ? 'browser upload is ready here' : 'open the web build to test browser uploads'}.
         </Text>
         {fileName ? <Text style={styles.fileName}>Loaded: {fileName}</Text> : null}
+        {coordinateKeys.latitudeKey && coordinateKeys.longitudeKey ? (
+          <Text style={styles.helpText}>
+            Detected coordinate columns: <Text style={styles.helpStrong}>{coordinateKeys.latitudeKey}</Text> and{' '}
+            <Text style={styles.helpStrong}>{coordinateKeys.longitudeKey}</Text>
+          </Text>
+        ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
 
