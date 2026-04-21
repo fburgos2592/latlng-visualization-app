@@ -40,7 +40,7 @@ const TOMTOM_CHUNK_SIZE = 70;
 const MAX_ROUTE_GROUPS = 12;
 const ROUTE_START_COLOR = '#dc2626';
 const ROUTE_END_COLOR = '#16a34a';
-const TOMTOM_ROUTE_BASE = 'https://api.tomtom.com/routing/1/calculateRoute';
+const PROXY_BASE = 'https://latlng-visualization-app.onrender.com/route';
 
 function sampleStops<T>(stops: T[], maxCount: number): T[] {
   if (stops.length <= maxCount) {
@@ -230,11 +230,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
         .filter((group) => group.stops.length >= 2)
         .slice(0, MAX_ROUTE_GROUPS);
       const statusMessages: string[] = [];
-      const hasApiKey = tomtomApiKey.trim().length > 0;
-
-      if (!hasApiKey && groupsToRender.length > 0) {
-        statusMessages.push('TomTom API key missing. Showing straight-line fallback routes only.');
-      }
+      const hasApiKey = true; // key lives on the Render proxy server
 
       for (const routeGroup of groupsToRender) {
         const preparedStops = sampleStops(routeGroup.stops, MAX_ROUTE_STOPS);
@@ -263,7 +259,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
             const coordinateString = chunk.map((stop) => `${stop.latitude},${stop.longitude}`).join(':');
 
             const params = new URLSearchParams({
-              key: tomtomApiKey.trim(),
+              waypoints: coordinateString,
               travelMode: 'truck',
               traffic: 'true',
               routeType: 'fastest',
@@ -278,7 +274,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
             });
 
             const response = await fetch(
-              `${TOMTOM_ROUTE_BASE}/${coordinateString}/json?${params.toString()}`
+              `${PROXY_BASE}?${params.toString()}`
             );
 
             if (!response.ok) {
