@@ -24,6 +24,8 @@ type ParkingMapProps = {
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
 const MAX_ROUTE_STOPS = 80;
 const OSRM_CHUNK_SIZE = 25;
+const ROUTE_START_COLOR = '#dc2626';
+const ROUTE_END_COLOR = '#16a34a';
 
 function sampleStops<T>(stops: T[], maxCount: number): T[] {
   if (stops.length <= maxCount) {
@@ -57,6 +59,79 @@ function chunkStops<T>(stops: T[], chunkSize: number): T[][] {
   }
 
   return chunks;
+}
+
+function hexToRgb(hex: string): { red: number; green: number; blue: number } {
+  const normalized = hex.replace('#', '');
+  return {
+    red: Number.parseInt(normalized.slice(0, 2), 16),
+    green: Number.parseInt(normalized.slice(2, 4), 16),
+    blue: Number.parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function rgbToHex(red: number, green: number, blue: number): string {
+  return `#${[red, green, blue]
+    .map((value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function interpolateColor(startHex: string, endHex: string, progress: number): string {
+  const start = hexToRgb(startHex);
+  const end = hexToRgb(endHex);
+
+  return rgbToHex(
+    start.red + (end.red - start.red) * progress,
+    start.green + (end.green - start.green) * progress,
+    start.blue + (end.blue - start.blue) * progress
+  );
+}
+
+function drawGradientRoute(
+  leaflet: any,
+  layerGroup: any,
+  coordinates: Array<[number, number]>,
+  options?: { weight?: number; opacity?: number; dashArray?: string }
+) {
+  if (coordinates.length < 2) {
+    return;
+  }
+
+  const segmentCount = coordinates.length - 1;
+
+  for (let index = 0; index < segmentCount; index += 1) {
+    const progress = segmentCount === 1 ? 1 : index / (segmentCount - 1);
+    leaflet
+      .polyline([coordinates[index], coordinates[index + 1]], {
+        color: interpolateColor(ROUTE_START_COLOR, ROUTE_END_COLOR, progress),
+        weight: options?.weight ?? 4,
+        opacity: options?.opacity ?? 0.85,
+        dashArray: options?.dashArray,
+      })
+      .addTo(layerGroup);
+  }
+
+  leaflet
+    .circleMarker(coordinates[0], {
+      radius: 7,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: ROUTE_START_COLOR,
+      fillOpacity: 1,
+    })
+    .bindTooltip('Start', { permanent: false })
+    .addTo(layerGroup);
+
+  leaflet
+    .circleMarker(coordinates[coordinates.length - 1], {
+      radius: 7,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: ROUTE_END_COLOR,
+      fillOpacity: 1,
+    })
+    .bindTooltip('End', { permanent: false })
+    .addTo(layerGroup);
 }
 
 export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
@@ -134,12 +209,12 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
         let fallbackPolyline: any = null;
 
         if (fallbackLine.length >= 2) {
-          fallbackPolyline = L.polyline(fallbackLine, {
-            color: '#2563eb',
+          fallbackPolyline = L.layerGroup().addTo(layerRef.current);
+          drawGradientRoute(L, fallbackPolyline, fallbackLine, {
             weight: 3,
             opacity: 0.55,
             dashArray: '8 8',
-          }).addTo(layerRef.current);
+          });
         }
 
         try {
@@ -176,20 +251,19 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
               layerRef.current.removeLayer(fallbackPolyline);
             }
 
-            L.polyline(routeCoordinates, {
-              color: '#2563eb',
+            drawGradientRoute(L, layerRef.current, routeCoordinates, {
               weight: 5,
               opacity: 0.9,
-            }).addTo(layerRef.current);
+            });
 
-            setRouteStatus('Blue line is following roads in uploaded stop order.');
+            setRouteStatus('Route color runs from red at the first stop to green at the last stop.');
           }
 
           if (routeStops.length > MAX_ROUTE_STOPS) {
-            setRouteStatus(`Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`);
+            setRouteStatus(`Route color runs from red to green. Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`);
           }
         } catch {
-          setRouteStatus('Routing service was unavailable, so the map is showing a straight-line path between stops.');
+          setRouteStatus('Routing service was unavailable, so the map is showing a straight-line red-to-green path between stops.');
         }
       }
 
