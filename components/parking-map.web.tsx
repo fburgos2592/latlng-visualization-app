@@ -22,14 +22,25 @@ type ParkingMapProps = {
       vehicleId: string | null;
     }>;
   }>;
+  tomtomApiKey: string;
+  truckProfile: {
+    vehicleCommercial: boolean;
+    vehicleWeightKg: number;
+    vehicleAxleWeightKg: number;
+    vehicleNumberOfAxles: number;
+    vehicleLengthM: number;
+    vehicleWidthM: number;
+    vehicleHeightM: number;
+  };
 };
 
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
 const MAX_ROUTE_STOPS = 80;
-const OSRM_CHUNK_SIZE = 25;
+const TOMTOM_CHUNK_SIZE = 70;
 const MAX_ROUTE_GROUPS = 12;
 const ROUTE_START_COLOR = '#dc2626';
 const ROUTE_END_COLOR = '#16a34a';
+const TOMTOM_ROUTE_BASE = 'https://api.tomtom.com/routing/1/calculateRoute';
 
 function sampleStops<T>(stops: T[], maxCount: number): T[] {
   if (stops.length <= maxCount) {
@@ -139,7 +150,15 @@ function drawGradientRoute(
     .addTo(layerGroup);
 }
 
-  export default function ParkingMap({ hotspots, routeGroups }: ParkingMapProps) {
+function clampPositiveNumber(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value < 0) {
+    return fallback;
+  }
+
+  return value;
+}
+
+export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckProfile }: ParkingMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -211,6 +230,11 @@ function drawGradientRoute(
         .filter((group) => group.stops.length >= 2)
         .slice(0, MAX_ROUTE_GROUPS);
       const statusMessages: string[] = [];
+      const hasApiKey = tomtomApiKey.trim().length > 0;
+
+      if (!hasApiKey && groupsToRender.length > 0) {
+        statusMessages.push('TomTom API key missing. Showing straight-line fallback routes only.');
+      }
 
       for (const routeGroup of groupsToRender) {
         const preparedStops = sampleStops(routeGroup.stops, MAX_ROUTE_STOPS);
@@ -228,31 +252,58 @@ function drawGradientRoute(
         }
 
         try {
-          const routeChunks = chunkStops(preparedStops, OSRM_CHUNK_SIZE);
+          if (!hasApiKey) {
+            continue;
+          }
+
+          const routeChunks = chunkStops(preparedStops, TOMTOM_CHUNK_SIZE);
           const routeCoordinates: Array<[number, number]> = [];
 
           for (const chunk of routeChunks) {
-            const coordinateString = chunk
-              .map((stop) => `${stop.longitude},${stop.latitude}`)
-              .join(';');
+            const coordinateString = chunk.map((stop) => `${stop.latitude},${stop.longitude}`).join(':');
+
+            const params = new URLSearchParams({
+              key: tomtomApiKey.trim(),
+              travelMode: 'truck',
+              traffic: 'true',
+              routeType: 'fastest',
+              vehicleCommercial: truckProfile.vehicleCommercial ? 'true' : 'false',
+              vehicleWeight: String(Math.round(clampPositiveNumber(truckProfile.vehicleWeightKg, 0))),
+              vehicleAxleWeight: String(Math.round(clampPositiveNumber(truckProfile.vehicleAxleWeightKg, 0))),
+              vehicleNumberOfAxles: String(Math.round(clampPositiveNumber(truckProfile.vehicleNumberOfAxles, 0))),
+              vehicleLength: String(clampPositiveNumber(truckProfile.vehicleLengthM, 0)),
+              vehicleWidth: String(clampPositiveNumber(truckProfile.vehicleWidthM, 0)),
+              vehicleHeight: String(clampPositiveNumber(truckProfile.vehicleHeightM, 0)),
+              routeRepresentation: 'polyline',
+            });
 
             const response = await fetch(
-              `https://router.project-osrm.org/route/v1/driving/${coordinateString}?overview=full&geometries=geojson`
+              `${TOMTOM_ROUTE_BASE}/${coordinateString}/json?${params.toString()}`
             );
 
             if (!response.ok) {
-              throw new Error('OSRM request failed');
+              throw new Error('TomTom request failed');
             }
 
             const payload = await response.json();
-            const geometry = payload.routes?.[0]?.geometry?.coordinates;
+            const route = payload.routes?.[0];
+            const geometry = Array.isArray(route?.legs)
+              ? route.legs.flatMap((leg: any) => leg?.points ?? [])
+              : route?.points ?? [];
 
             if (!Array.isArray(geometry) || geometry.length === 0) {
               continue;
             }
 
             for (const coordinate of geometry) {
-              routeCoordinates.push([coordinate[1], coordinate[0]]);
+              if (Array.isArray(coordinate) && coordinate.length >= 2) {
+                routeCoordinates.push([coordinate[1], coordinate[0]]);
+                continue;
+              }
+
+              if (coordinate && typeof coordinate.latitude === 'number' && typeof coordinate.longitude === 'number') {
+                routeCoordinates.push([coordinate.latitude, coordinate.longitude]);
+              }
             }
           }
 
@@ -271,7 +322,7 @@ function drawGradientRoute(
             statusMessages.push(`${label}: sampled ${MAX_ROUTE_STOPS} of ${routeGroup.stops.length} stops.`);
           }
         } catch {
-          statusMessages.push(`${label}: routing unavailable, showing straight-line fallback.`);
+          statusMessages.push(`${label}: TomTom route unavailable, showing straight-line fallback.`);
         }
       }
 
@@ -282,7 +333,7 @@ function drawGradientRoute(
       if (statusMessages.length > 0) {
         setRouteStatus(statusMessages.join(' '));
       } else if (groupsToRender.length > 0) {
-        setRouteStatus('Routes are now drawn per truck (vehicle_id), each from red start to green end.');
+        setRouteStatus('TomTom truck routing is active per vehicle_id, each route drawn from red start to green end.');
       }
 
       if (hotspots.length === 1) {
@@ -300,7 +351,7 @@ function drawGradientRoute(
     return () => {
       disposed = true;
     };
-  }, [hotspots, routeGroups]);
+  }, [hotspots, routeGroups, tomtomApiKey, truckProfile]);
 
   useEffect(() => {
     return () => {

@@ -1,6 +1,6 @@
 # LatLng Visualization App
 
-Web app for exploring truck stop data from CSV or Excel uploads. The app detects latitude and longitude columns, plots repeated stop locations as parking hotspots, and draws an ordered route between stops on top of an OpenStreetMap base layer.
+Web app for exploring truck stop data from CSV or Excel uploads. The app detects latitude and longitude columns, plots repeated stop locations as parking hotspots, and draws ordered per-truck routes on top of an OpenStreetMap base layer.
 
 Live site:
 
@@ -11,9 +11,10 @@ Live site:
 - Uploads `.csv`, `.xls`, or `.xlsx` files directly in the browser.
 - Detects coordinate columns such as `lat/lng`, `latitude/longitude`, and `vehicle_lat/vehicle_lng`.
 - Groups repeated coordinates into parking hotspots so frequent truck stop locations stand out.
-- Draws a route line between uploaded stops.
-- Attempts to snap the route to roads using the public OSRM routing service.
-- Falls back to a straight-line route if the routing service is unavailable.
+- Draws routes per `vehicle_id`, ordered from oldest to newest stop times.
+- Snaps routes to roads using TomTom truck routing.
+- Applies commercial/truck restrictions with configurable vehicle profile settings (weight, axle, length, width, height).
+- Falls back to a straight-line route if routing is unavailable or no TomTom key is provided.
 - Shows hotspot counts, vehicle counts, and average speed when that data is present.
 
 ## Supported Upload Format
@@ -36,13 +37,15 @@ Header matching is case-insensitive and tolerant of common naming variants.
 
 - Orange circles represent parking hotspots.
 - Larger circles mean more repeated stops at that location.
-- The blue line follows uploaded stop order.
-- When routing succeeds, the blue line follows roads.
-- When routing fails, the line falls back to a dashed straight path.
+- Route lines are per truck and colorized from red (start) to green (end).
+- When routing succeeds, route lines follow truck-allowed roads.
+- When routing fails, route lines fall back to dashed straight paths.
 
 Hotspots are grouped by nearby coordinates rounded to roughly city-block precision, which helps separate meaningful parking behavior from minor GPS jitter.
 
 ## Local Development
+
+Before testing truck-aware routing, create a TomTom API key at https://developer.tomtom.com and paste it into the app's TomTom API key field.
 
 If `node` and `npm` are already on your `PATH`:
 
@@ -95,14 +98,14 @@ That command:
 - React Native Web
 - Leaflet
 - OpenStreetMap tiles
-- OSRM public routing API
+- TomTom Routing API (truck travel mode)
 - Papa Parse
 - SheetJS (`xlsx`)
 
 ## Current Limitations
 
-- The route follows upload order, not an explicitly reconstructed trip timeline.
-- Public OSRM routing can rate-limit or fail for large or noisy inputs.
+- TomTom routing requires an API key and internet access.
+- Very large stop sets may be sampled for performance and API limits.
 - Parking detection is still coordinate-based, not dwell-time based.
 
 ## Good Next Steps

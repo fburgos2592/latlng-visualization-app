@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
 import React, { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import ParkingMap from '@/components/parking-map';
@@ -28,6 +28,16 @@ type RouteStop = {
 type RouteGroup = {
   vehicleId: string;
   stops: RouteStop[];
+};
+
+type TruckProfile = {
+  vehicleCommercial: boolean;
+  vehicleWeightKg: number;
+  vehicleAxleWeightKg: number;
+  vehicleNumberOfAxles: number;
+  vehicleLengthM: number;
+  vehicleWidthM: number;
+  vehicleHeightM: number;
 };
 
 type Hotspot = {
@@ -69,6 +79,15 @@ const TIME_ALIASES = [
 ];
 const HOTSPOT_PRECISION = 3;
 const ROUTE_PRECISION = 4;
+const DEFAULT_TRUCK_PROFILE: TruckProfile = {
+  vehicleCommercial: true,
+  vehicleWeightKg: 15000,
+  vehicleAxleWeightKg: 7000,
+  vehicleNumberOfAxles: 2,
+  vehicleLengthM: 10.0,
+  vehicleWidthM: 2.6,
+  vehicleHeightM: 3.8,
+};
 
 function toNumber(value: unknown): number | null {
   const parsed = Number(String(value ?? '').trim());
@@ -326,6 +345,8 @@ export default function HomeScreen() {
   const [rows, setRows] = useState<CsvRow[]>([]);
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
+  const [tomtomApiKey, setTomtomApiKey] = useState('');
+  const [truckProfile, setTruckProfile] = useState<TruckProfile>(DEFAULT_TRUCK_PROFILE);
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
   const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
   const speedKey = useMemo(() => detectOptionalKey(rows, SPEED_ALIASES), [rows]);
@@ -496,6 +517,15 @@ export default function HomeScreen() {
     [routeGroups]
   );
 
+  function updateTruckProfile(field: keyof TruckProfile, value: string) {
+    const parsed = Number(value);
+
+    setTruckProfile((current) => ({
+      ...current,
+      [field]: Number.isFinite(parsed) ? parsed : 0,
+    }));
+  }
+
   async function pickCsv() {
     setError('');
 
@@ -617,7 +647,85 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        <ParkingMap hotspots={hotspots} routeGroups={routeGroups} />
+        <View style={styles.routingConfig}>
+          <Text style={styles.configTitle}>TomTom Truck Routing Settings</Text>
+          <Text style={styles.helpText}>
+            Paste a TomTom API key to route trucks on commercial-allowed roads with height/weight restrictions.
+          </Text>
+          <TextInput
+            value={tomtomApiKey}
+            onChangeText={setTomtomApiKey}
+            style={styles.input}
+            placeholder="TomTom API key"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={styles.inputsRow}>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Weight kg</Text>
+              <TextInput
+                value={String(truckProfile.vehicleWeightKg)}
+                onChangeText={(value) => updateTruckProfile('vehicleWeightKg', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Axle weight kg</Text>
+              <TextInput
+                value={String(truckProfile.vehicleAxleWeightKg)}
+                onChangeText={(value) => updateTruckProfile('vehicleAxleWeightKg', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Axles</Text>
+              <TextInput
+                value={String(truckProfile.vehicleNumberOfAxles)}
+                onChangeText={(value) => updateTruckProfile('vehicleNumberOfAxles', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
+          <View style={styles.inputsRow}>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Length m</Text>
+              <TextInput
+                value={String(truckProfile.vehicleLengthM)}
+                onChangeText={(value) => updateTruckProfile('vehicleLengthM', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Width m</Text>
+              <TextInput
+                value={String(truckProfile.vehicleWidthM)}
+                onChangeText={(value) => updateTruckProfile('vehicleWidthM', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Height m</Text>
+              <TextInput
+                value={String(truckProfile.vehicleHeightM)}
+                onChangeText={(value) => updateTruckProfile('vehicleHeightM', value)}
+                style={styles.input}
+                keyboardType="numeric"
+              />
+            </View>
+          </View>
+        </View>
+
+        <ParkingMap
+          hotspots={hotspots}
+          routeGroups={routeGroups}
+          tomtomApiKey={tomtomApiKey}
+          truckProfile={truckProfile}
+        />
 
         <Text style={styles.mapNote}>
           Hotspots are grouped by nearby coordinates rounded to about 3 decimal places, roughly a
@@ -625,7 +733,7 @@ export default function HomeScreen() {
         </Text>
         <Text style={styles.mapNote}>
           Routes are built per truck (`vehicle_id`) in stop-time order (oldest to newest), then
-          snapped to roads with a public routing service. Consecutive duplicate GPS points are
+          snapped to roads using TomTom truck routing. Consecutive duplicate GPS points are
           removed before routing.
         </Text>
 
@@ -779,6 +887,44 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 14,
     lineHeight: 20,
+  },
+  routingConfig: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 12,
+    padding: 12,
+    gap: 10,
+    backgroundColor: '#f8fafc',
+  },
+  configTitle: {
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  inputsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  inputBlock: {
+    flexGrow: 1,
+    minWidth: 140,
+    gap: 6,
+  },
+  inputLabel: {
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#0f172a',
+    backgroundColor: '#ffffff',
   },
   boundsRow: {
     flexDirection: 'row',
