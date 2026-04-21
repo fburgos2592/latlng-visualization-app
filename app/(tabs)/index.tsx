@@ -4,12 +4,26 @@ import React, { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
+import ParkingMap from '@/components/parking-map';
+
 type CsvRow = Record<string, unknown>;
 
 type Point = {
   id: string;
   latitude: number;
   longitude: number;
+  vehicleId: string | null;
+  speed: number | null;
+};
+
+type Hotspot = {
+  id: string;
+  latitude: number;
+  longitude: number;
+  count: number;
+  vehicleCount: number;
+  vehicleIds: string[];
+  averageSpeed: number | null;
 };
 
 type Bounds = {
@@ -26,6 +40,9 @@ type CoordinateKeys = {
 
 const LATITUDE_ALIASES = ['lat', 'latitude', 'vehicle_lat', 'vehicle_latitude'];
 const LONGITUDE_ALIASES = ['lng', 'lon', 'long', 'longitude', 'vehicle_lng', 'vehicle_lon', 'vehicle_longitude'];
+const VEHICLE_ID_ALIASES = ['vehicle_id', 'truck_id', 'unit_id', 'vehicle'];
+const SPEED_ALIASES = ['speed', 'mph'];
+const HOTSPOT_PRECISION = 3;
 
 function toNumber(value: unknown): number | null {
   const parsed = Number(String(value ?? '').trim());
@@ -70,6 +87,27 @@ function detectCoordinateKeys(rows: CsvRow[]): CoordinateKeys {
     latitudeKey: pickBestKey(latitudeCandidates, LATITUDE_ALIASES),
     longitudeKey: pickBestKey(longitudeCandidates, LONGITUDE_ALIASES),
   };
+}
+
+function detectOptionalKey(rows: CsvRow[], aliases: string[]): string | null {
+  const allKeys = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
+
+  const exactMatch = pickBestKey(allKeys, aliases);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const containsMatches = allKeys.filter((key) => {
+    const normalized = normalizeKey(key);
+    return aliases.some((alias) => normalized.includes(normalizeKey(alias)));
+  });
+
+  return containsMatches[0] ?? null;
+}
+
+function roundCoordinate(value: number, precision: number): number {
+  const multiplier = 10 ** precision;
+  return Math.round(value * multiplier) / multiplier;
 }
 
 function getField(row: CsvRow, key: string | null): unknown {
@@ -188,12 +226,17 @@ export default function HomeScreen() {
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
+  const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
+  const speedKey = useMemo(() => detectOptionalKey(rows, SPEED_ALIASES), [rows]);
 
   const points = useMemo(() => {
     return rows
       .map((row, index) => {
         const latitude = toNumber(getField(row, coordinateKeys.latitudeKey));
         const longitude = toNumber(getField(row, coordinateKeys.longitudeKey));
+        const vehicleIdRaw = getField(row, vehicleIdKey);
+        const vehicleId = String(vehicleIdRaw ?? '').trim() || null;
+        const speed = toNumber(getField(row, speedKey));
 
         if (latitude == null || longitude == null) {
           return null;
@@ -203,24 +246,69 @@ export default function HomeScreen() {
           id: String(index),
           latitude,
           longitude,
+          vehicleId,
+          speed,
         } satisfies Point;
       })
       .filter((point): point is Point => point !== null);
-  }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, rows]);
+  }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, rows, speedKey, vehicleIdKey]);
 
   const invalidRowCount = rows.length - points.length;
   const bounds = useMemo(() => getBounds(points), [points]);
+  const hotspots = useMemo(() => {
+    const grouped = new Map<
+      string,
+      {
+        totalLat: number;
+        totalLng: number;
+        count: number;
+        vehicleIds: Set<string>;
+        totalSpeed: number;
+        speedSamples: number;
+      }
+    >();
 
-  const plottedPoints = useMemo(() => {
-    const lngRange = Math.max(bounds.maxLng - bounds.minLng, 1);
-    const latRange = Math.max(bounds.maxLat - bounds.minLat, 1);
+    for (const point of points) {
+      const groupLat = roundCoordinate(point.latitude, HOTSPOT_PRECISION);
+      const groupLng = roundCoordinate(point.longitude, HOTSPOT_PRECISION);
+      const groupKey = `${groupLat}:${groupLng}`;
+      const existing = grouped.get(groupKey) ?? {
+        totalLat: 0,
+        totalLng: 0,
+        count: 0,
+        vehicleIds: new Set<string>(),
+        totalSpeed: 0,
+        speedSamples: 0,
+      };
 
-    return points.map((point) => ({
-      ...point,
-      x: ((point.longitude - bounds.minLng) / lngRange) * 100,
-      y: 100 - ((point.latitude - bounds.minLat) / latRange) * 100,
-    }));
-  }, [bounds, points]);
+      existing.totalLat += point.latitude;
+      existing.totalLng += point.longitude;
+      existing.count += 1;
+
+      if (point.vehicleId) {
+        existing.vehicleIds.add(point.vehicleId);
+      }
+
+      if (point.speed != null) {
+        existing.totalSpeed += point.speed;
+        existing.speedSamples += 1;
+      }
+
+      grouped.set(groupKey, existing);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([key, value]) => ({
+        id: key,
+        latitude: value.totalLat / value.count,
+        longitude: value.totalLng / value.count,
+        count: value.count,
+        vehicleCount: value.vehicleIds.size,
+        vehicleIds: Array.from(value.vehicleIds).sort(),
+        averageSpeed: value.speedSamples > 0 ? value.totalSpeed / value.speedSamples : null,
+      }))
+      .sort((left, right) => right.count - left.count);
+  }, [points]);
 
   async function pickCsv() {
     setError('');
@@ -320,47 +408,19 @@ export default function HomeScreen() {
 
       <View style={styles.card}>
         <View style={styles.plotHeader}>
-          <Text style={styles.sectionTitle}>Coordinate Plot</Text>
+          <Text style={styles.sectionTitle}>Parking Map</Text>
           <Text style={styles.sectionCopy}>
-            This is a static geographic canvas scaled to the bounds of your uploaded points.
+            Repeated coordinates are grouped into parking hotspots so the places your trucks return
+            to most often stand out on the map.
           </Text>
         </View>
 
-        <View style={styles.plotShell}>
-          <Text style={styles.axisTop}>Lat {formatCoordinate(bounds.maxLat)}</Text>
-          <Text style={styles.axisLeft}>Lng {formatCoordinate(bounds.minLng)}</Text>
-          <View style={styles.plot}>
-            {[20, 40, 60, 80].map((position) => (
-              <React.Fragment key={position}>
-                <View style={[styles.horizontalGrid, { top: `${position}%` }]} />
-                <View style={[styles.verticalGrid, { left: `${position}%` }]} />
-              </React.Fragment>
-            ))}
+        <ParkingMap hotspots={hotspots} />
 
-            {plottedPoints.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>No coordinates plotted yet</Text>
-                <Text style={styles.emptyCopy}>
-                  Upload a CSV to project each valid coordinate into the chart.
-                </Text>
-              </View>
-            ) : null}
-
-            {plottedPoints.map((point) => (
-              <View
-                key={point.id}
-                style={[
-                  styles.marker,
-                  {
-                    left: `${point.x}%`,
-                    top: `${point.y}%`,
-                  },
-                ]}
-              />
-            ))}
-          </View>
-          <Text style={styles.axisBottom}>Lng {formatCoordinate(bounds.maxLng)}</Text>
-        </View>
+        <Text style={styles.mapNote}>
+          Hotspots are grouped by nearby coordinates rounded to about 3 decimal places, roughly a
+          city block scale. Larger circles mean more repeated stops at that location.
+        </Text>
 
         <View style={styles.boundsRow}>
           <Text style={styles.boundsText}>Min lat: {formatCoordinate(bounds.minLat)}</Text>
@@ -371,16 +431,21 @@ export default function HomeScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Point Preview</Text>
-        {points.slice(0, 12).map((point, index) => (
-          <View key={point.id} style={styles.previewRow}>
+        <Text style={styles.sectionTitle}>Top Parking Hotspots</Text>
+        {hotspots.slice(0, 12).map((hotspot, index) => (
+          <View key={hotspot.id} style={styles.previewRow}>
             <Text style={styles.previewIndex}>#{index + 1}</Text>
-            <Text style={styles.previewValue}>Lat {formatCoordinate(point.latitude)}</Text>
-            <Text style={styles.previewValue}>Lng {formatCoordinate(point.longitude)}</Text>
+            <Text style={styles.previewValue}>Lat {formatCoordinate(hotspot.latitude)}</Text>
+            <Text style={styles.previewValue}>Lng {formatCoordinate(hotspot.longitude)}</Text>
+            <Text style={styles.previewValue}>Stops {hotspot.count}</Text>
+            <Text style={styles.previewValue}>Vehicles {hotspot.vehicleCount}</Text>
+            {hotspot.averageSpeed != null ? (
+              <Text style={styles.previewValue}>Avg speed {hotspot.averageSpeed.toFixed(2)}</Text>
+            ) : null}
           </View>
         ))}
-        {points.length > 12 ? (
-          <Text style={styles.moreText}>Showing first 12 of {points.length} valid points.</Text>
+        {hotspots.length > 12 ? (
+          <Text style={styles.moreText}>Showing first 12 of {hotspots.length} hotspot groups.</Text>
         ) : null}
       </View>
     </ScrollView>
@@ -493,85 +558,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  plotShell: {
-    gap: 8,
-  },
-  axisTop: {
-    color: '#475569',
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  axisLeft: {
-    color: '#475569',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  axisBottom: {
-    color: '#475569',
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  plot: {
-    minHeight: 420,
-    borderRadius: 18,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#bfd7ea',
-    backgroundColor: '#dff4ff',
-    position: 'relative',
-  },
-  horizontalGrid: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: '#bfdbfe',
-  },
-  verticalGrid: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: '#bfdbfe',
-  },
-  marker: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 999,
-    backgroundColor: '#f97316',
-    borderWidth: 2,
-    borderColor: '#fff7ed',
-    marginLeft: -6,
-    marginTop: -6,
-    shadowColor: '#9a3412',
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
-  },
-  emptyState: {
-    flex: 1,
-    minHeight: 420,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    gap: 8,
-  },
-  emptyTitle: {
-    color: '#0f172a',
-    fontSize: 22,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  emptyCopy: {
+  mapNote: {
     color: '#475569',
     fontSize: 14,
     lineHeight: 20,
-    textAlign: 'center',
-    maxWidth: 320,
   },
   boundsRow: {
     flexDirection: 'row',
