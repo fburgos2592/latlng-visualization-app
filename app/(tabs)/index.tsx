@@ -14,6 +14,8 @@ type Point = {
   longitude: number;
   vehicleId: string | null;
   speed: number | null;
+  eventTimeMs: number | null;
+  rowIndex: number;
 };
 
 type RouteStop = {
@@ -49,6 +51,17 @@ const LATITUDE_ALIASES = ['lat', 'latitude', 'vehicle_lat', 'vehicle_latitude'];
 const LONGITUDE_ALIASES = ['lng', 'lon', 'long', 'longitude', 'vehicle_lng', 'vehicle_lon', 'vehicle_longitude'];
 const VEHICLE_ID_ALIASES = ['vehicle_id', 'truck_id', 'unit_id', 'vehicle'];
 const SPEED_ALIASES = ['speed', 'mph'];
+const START_TIME_ALIASES = ['reading_start', 'start_time', 'started_at', 'stop_start'];
+const END_TIME_ALIASES = ['reading_finish', 'end_time', 'finished_at', 'stop_end'];
+const TIME_ALIASES = [
+  'reading_start',
+  'reading_finish',
+  'timestamp',
+  'datetime',
+  'event_time',
+  'add_time',
+  'time',
+];
 const HOTSPOT_PRECISION = 3;
 const ROUTE_PRECISION = 4;
 
@@ -116,6 +129,81 @@ function detectOptionalKey(rows: CsvRow[], aliases: string[]): string | null {
 function roundCoordinate(value: number, precision: number): number {
   const multiplier = 10 ** precision;
   return Math.round(value * multiplier) / multiplier;
+}
+
+function parseTimeValue(value: unknown): number | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Excel serial date numbers are days since 1899-12-30.
+    if (value > 20_000) {
+      return Math.round((value - 25569) * 86_400_000);
+    }
+
+    return Math.round(value);
+  }
+
+  const text = String(value).trim();
+  if (text.length === 0) {
+    return null;
+  }
+
+  const numericText = Number(text);
+  if (Number.isFinite(numericText) && text.match(/^\d+(\.\d+)?$/)) {
+    if (numericText > 20_000) {
+      return Math.round((numericText - 25569) * 86_400_000);
+    }
+
+    return Math.round(numericText);
+  }
+
+  // Common US format: 4/20/26 11:34 AM (or with 4-digit year / seconds)
+  const usDateTimeMatch = text.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[\s,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([APap][Mm])?)?$/
+  );
+  if (usDateTimeMatch) {
+    const month = Number.parseInt(usDateTimeMatch[1], 10) - 1;
+    const day = Number.parseInt(usDateTimeMatch[2], 10);
+    const rawYear = Number.parseInt(usDateTimeMatch[3], 10);
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    let hour = Number.parseInt(usDateTimeMatch[4] ?? '0', 10);
+    const minute = Number.parseInt(usDateTimeMatch[5] ?? '0', 10);
+    const second = Number.parseInt(usDateTimeMatch[6] ?? '0', 10);
+    const meridiem = (usDateTimeMatch[7] ?? '').toUpperCase();
+
+    if (meridiem === 'PM' && hour < 12) {
+      hour += 12;
+    }
+    if (meridiem === 'AM' && hour === 12) {
+      hour = 0;
+    }
+
+    const parsed = new Date(year, month, day, hour, minute, second);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.getTime();
+    }
+  }
+
+  const parsedDate = new Date(text);
+  if (!Number.isNaN(parsedDate.getTime())) {
+    return parsedDate.getTime();
+  }
+
+  const timeMatch = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?$/);
+  if (timeMatch) {
+    const hours = Number.parseInt(timeMatch[1], 10);
+    const minutes = Number.parseInt(timeMatch[2], 10);
+    const seconds = Number.parseInt(timeMatch[3] ?? '0', 10);
+    const millis = Number.parseInt((timeMatch[4] ?? '0').padEnd(3, '0').slice(0, 3), 10);
+
+    if ([hours, minutes, seconds, millis].every(Number.isFinite)) {
+      return (((hours * 60 + minutes) * 60 + seconds) * 1000) + millis;
+    }
+  }
+
+  return null;
 }
 
 function getField(row: CsvRow, key: string | null): unknown {
@@ -236,6 +324,9 @@ export default function HomeScreen() {
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
   const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
   const speedKey = useMemo(() => detectOptionalKey(rows, SPEED_ALIASES), [rows]);
+  const startTimeKey = useMemo(() => detectOptionalKey(rows, START_TIME_ALIASES), [rows]);
+  const endTimeKey = useMemo(() => detectOptionalKey(rows, END_TIME_ALIASES), [rows]);
+  const routeTimeKey = useMemo(() => detectOptionalKey(rows, TIME_ALIASES), [rows]);
 
   const points = useMemo(() => {
     return rows
@@ -245,6 +336,10 @@ export default function HomeScreen() {
         const vehicleIdRaw = getField(row, vehicleIdKey);
         const vehicleId = String(vehicleIdRaw ?? '').trim() || null;
         const speed = toNumber(getField(row, speedKey));
+        const startTimeMs = parseTimeValue(getField(row, startTimeKey));
+        const endTimeMs = parseTimeValue(getField(row, endTimeKey));
+        const fallbackTimeMs = parseTimeValue(getField(row, routeTimeKey));
+        const eventTimeMs = startTimeMs ?? endTimeMs ?? fallbackTimeMs;
 
         if (latitude == null || longitude == null) {
           return null;
@@ -256,10 +351,12 @@ export default function HomeScreen() {
           longitude,
           vehicleId,
           speed,
+          eventTimeMs,
+          rowIndex: index,
         } satisfies Point;
       })
       .filter((point): point is Point => point !== null);
-  }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, rows, speedKey, vehicleIdKey]);
+  }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, endTimeKey, routeTimeKey, rows, speedKey, startTimeKey, vehicleIdKey]);
 
   const invalidRowCount = rows.length - points.length;
   const bounds = useMemo(() => getBounds(points), [points]);
@@ -319,10 +416,38 @@ export default function HomeScreen() {
   }, [points]);
 
   const routeStops = useMemo(() => {
+    const pointsInRouteOrder = [...points];
+    const hasUsableTime = pointsInRouteOrder.some((point) => point.eventTimeMs != null);
+
+    if (hasUsableTime) {
+      pointsInRouteOrder.sort((left, right) => {
+        const leftTime = left.eventTimeMs;
+        const rightTime = right.eventTimeMs;
+
+        if (leftTime == null && rightTime == null) {
+          return left.rowIndex - right.rowIndex;
+        }
+
+        if (leftTime == null) {
+          return 1;
+        }
+
+        if (rightTime == null) {
+          return -1;
+        }
+
+        if (leftTime !== rightTime) {
+          return leftTime - rightTime;
+        }
+
+        return left.rowIndex - right.rowIndex;
+      });
+    }
+
     const orderedStops: RouteStop[] = [];
     let previousKey: string | null = null;
 
-    for (const point of points) {
+    for (const point of pointsInRouteOrder) {
       const roundedLat = roundCoordinate(point.latitude, ROUTE_PRECISION);
       const roundedLng = roundCoordinate(point.longitude, ROUTE_PRECISION);
       const currentKey = `${roundedLat}:${roundedLng}`;
@@ -436,6 +561,22 @@ export default function HomeScreen() {
             <Text style={styles.helpStrong}>{coordinateKeys.longitudeKey}</Text>
           </Text>
         ) : null}
+        {startTimeKey || endTimeKey || routeTimeKey ? (
+          <Text style={styles.helpText}>
+            Route order uses stop times: <Text style={styles.helpStrong}>{startTimeKey ?? 'n/a'}</Text>
+            {' '}to{' '}
+            <Text style={styles.helpStrong}>{endTimeKey ?? 'n/a'}</Text>
+            {routeTimeKey && routeTimeKey !== startTimeKey && routeTimeKey !== endTimeKey ? (
+              <>
+                {' '}with fallback time column <Text style={styles.helpStrong}>{routeTimeKey}</Text>
+              </>
+            ) : null}
+          </Text>
+        ) : (
+          <Text style={styles.helpText}>
+            No time column detected. Route order is currently based on uploaded row order.
+          </Text>
+        )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
 
@@ -455,7 +596,7 @@ export default function HomeScreen() {
           city block scale. Larger circles mean more repeated stops at that location.
         </Text>
         <Text style={styles.mapNote}>
-          The blue route follows the uploaded stop order and is snapped to roads with a public
+          The route follows stop-time order (oldest to newest), then snaps to roads with a public
           routing service. Consecutive duplicate GPS points are removed before routing.
         </Text>
 
