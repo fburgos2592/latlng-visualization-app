@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
 import React, { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import ParkingMap from '@/components/parking-map';
@@ -580,10 +580,10 @@ export default function HomeScreen() {
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.pageBg }]}>
       <View style={styles.hero}>
         <View style={styles.heroHeader}>
-          <View>
-            <Text style={[styles.logoMark, { color: theme.accent }]}>BALDOR</Text>
-            <Text style={[styles.logoSub, { color: theme.muted }]}>Specialty Foods</Text>
-          </View>
+          <Image
+            source={require('@/assets/images/baldor-logo.png')}
+            style={{ width: 90, height: 52, resizeMode: 'contain' }}
+          />
           <Pressable onPress={() => setDarkMode((d) => !d)} style={[styles.themeToggle, { backgroundColor: theme.toggleBg }]}>
             <Text style={[styles.themeToggleText, { color: theme.toggleText }]}>{darkMode ? '☀ Light' : '☾ Dark'}</Text>
           </Pressable>
@@ -839,11 +839,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     letterSpacing: 3,
-  },
-  logoSub: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1.5,
   },
   themeToggle: {
     borderRadius: 999,
