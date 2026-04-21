@@ -13,17 +13,21 @@ type Hotspot = {
 
 type ParkingMapProps = {
   hotspots: Hotspot[];
-  routeStops: Array<{
-    id: string;
-    latitude: number;
-    longitude: number;
-    vehicleId: string | null;
+  routeGroups: Array<{
+    vehicleId: string;
+    stops: Array<{
+      id: string;
+      latitude: number;
+      longitude: number;
+      vehicleId: string | null;
+    }>;
   }>;
 };
 
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
 const MAX_ROUTE_STOPS = 80;
 const OSRM_CHUNK_SIZE = 25;
+const MAX_ROUTE_GROUPS = 12;
 const ROUTE_START_COLOR = '#dc2626';
 const ROUTE_END_COLOR = '#16a34a';
 
@@ -91,6 +95,7 @@ function drawGradientRoute(
   leaflet: any,
   layerGroup: any,
   coordinates: Array<[number, number]>,
+  label: string,
   options?: { weight?: number; opacity?: number; dashArray?: string }
 ) {
   if (coordinates.length < 2) {
@@ -119,7 +124,7 @@ function drawGradientRoute(
       fillColor: ROUTE_START_COLOR,
       fillOpacity: 1,
     })
-    .bindTooltip('Start', { permanent: false })
+    .bindTooltip(`Start • ${label}`, { permanent: false })
     .addTo(layerGroup);
 
   leaflet
@@ -130,11 +135,11 @@ function drawGradientRoute(
       fillColor: ROUTE_END_COLOR,
       fillOpacity: 1,
     })
-    .bindTooltip('End', { permanent: false })
+    .bindTooltip(`End • ${label}`, { permanent: false })
     .addTo(layerGroup);
 }
 
-export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
+  export default function ParkingMap({ hotspots, routeGroups }: ParkingMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -202,17 +207,22 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
           .addTo(layerRef.current);
       }
 
-      const preparedStops = sampleStops(routeStops, MAX_ROUTE_STOPS);
+      const groupsToRender = routeGroups
+        .filter((group) => group.stops.length >= 2)
+        .slice(0, MAX_ROUTE_GROUPS);
+      const statusMessages: string[] = [];
 
-      if (preparedStops.length >= 2) {
+      for (const routeGroup of groupsToRender) {
+        const preparedStops = sampleStops(routeGroup.stops, MAX_ROUTE_STOPS);
+        const label = `Truck ${routeGroup.vehicleId}`;
         const fallbackLine = preparedStops.map((stop) => [stop.latitude, stop.longitude] as [number, number]);
         let fallbackPolyline: any = null;
 
         if (fallbackLine.length >= 2) {
           fallbackPolyline = L.layerGroup().addTo(layerRef.current);
-          drawGradientRoute(L, fallbackPolyline, fallbackLine, {
+          drawGradientRoute(L, fallbackPolyline, fallbackLine, label, {
             weight: 3,
-            opacity: 0.55,
+            opacity: 0.45,
             dashArray: '8 8',
           });
         }
@@ -251,20 +261,28 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
               layerRef.current.removeLayer(fallbackPolyline);
             }
 
-            drawGradientRoute(L, layerRef.current, routeCoordinates, {
+            drawGradientRoute(L, layerRef.current, routeCoordinates, label, {
               weight: 5,
               opacity: 0.9,
             });
-
-            setRouteStatus('Route color runs from red at the first stop to green at the last stop.');
           }
 
-          if (routeStops.length > MAX_ROUTE_STOPS) {
-            setRouteStatus(`Route color runs from red to green. Showing a sampled road route across ${MAX_ROUTE_STOPS} of ${routeStops.length} ordered stops.`);
+          if (routeGroup.stops.length > MAX_ROUTE_STOPS) {
+            statusMessages.push(`${label}: sampled ${MAX_ROUTE_STOPS} of ${routeGroup.stops.length} stops.`);
           }
         } catch {
-          setRouteStatus('Routing service was unavailable, so the map is showing a straight-line red-to-green path between stops.');
+          statusMessages.push(`${label}: routing unavailable, showing straight-line fallback.`);
         }
+      }
+
+      if (routeGroups.length > MAX_ROUTE_GROUPS) {
+        statusMessages.push(`Showing top ${MAX_ROUTE_GROUPS} truck routes by stop count.`);
+      }
+
+      if (statusMessages.length > 0) {
+        setRouteStatus(statusMessages.join(' '));
+      } else if (groupsToRender.length > 0) {
+        setRouteStatus('Routes are now drawn per truck (vehicle_id), each from red start to green end.');
       }
 
       if (hotspots.length === 1) {
@@ -282,7 +300,7 @@ export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
     return () => {
       disposed = true;
     };
-  }, [hotspots, routeStops]);
+  }, [hotspots, routeGroups]);
 
   useEffect(() => {
     return () => {

@@ -12,21 +12,26 @@ type Hotspot = {
 
 type ParkingMapProps = {
   hotspots: Hotspot[];
-  routeStops: Array<{
-    id: string;
-    latitude: number;
-    longitude: number;
-    vehicleId: string | null;
+  routeGroups: Array<{
+    vehicleId: string;
+    stops: Array<{
+      id: string;
+      latitude: number;
+      longitude: number;
+      vehicleId: string | null;
+    }>;
   }>;
 };
 
-export default function ParkingMap({ hotspots, routeStops }: ParkingMapProps) {
+export default function ParkingMap({ hotspots, routeGroups }: ParkingMapProps) {
+  const stopCount = routeGroups.reduce((total, group) => total + group.stops.length, 0);
+
   return (
     <View style={styles.shell}>
       <Text style={styles.title}>Map preview is available on the web build.</Text>
       <Text style={styles.copy}>
         Upload the same file in the GitHub Pages site to inspect {hotspots.length} hotspot groups and
-        a road-based route across {routeStops.length} ordered stops on an interactive map.
+        truck-specific road routes across {stopCount} ordered stops on an interactive map.
       </Text>
     </View>
   );

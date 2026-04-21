@@ -25,6 +25,11 @@ type RouteStop = {
   vehicleId: string | null;
 };
 
+type RouteGroup = {
+  vehicleId: string;
+  stops: RouteStop[];
+};
+
 type Hotspot = {
   id: string;
   latitude: number;
@@ -415,58 +420,81 @@ export default function HomeScreen() {
       .sort((left, right) => right.count - left.count);
   }, [points]);
 
-  const routeStops = useMemo(() => {
-    const pointsInRouteOrder = [...points];
-    const hasUsableTime = pointsInRouteOrder.some((point) => point.eventTimeMs != null);
+  const routeGroups = useMemo(() => {
+    const groupedPoints = new Map<string, Point[]>();
 
-    if (hasUsableTime) {
-      pointsInRouteOrder.sort((left, right) => {
-        const leftTime = left.eventTimeMs;
-        const rightTime = right.eventTimeMs;
-
-        if (leftTime == null && rightTime == null) {
-          return left.rowIndex - right.rowIndex;
-        }
-
-        if (leftTime == null) {
-          return 1;
-        }
-
-        if (rightTime == null) {
-          return -1;
-        }
-
-        if (leftTime !== rightTime) {
-          return leftTime - rightTime;
-        }
-
-        return left.rowIndex - right.rowIndex;
-      });
+    for (const point of points) {
+      const vehicleKey = point.vehicleId?.trim() || 'Unassigned';
+      const existing = groupedPoints.get(vehicleKey) ?? [];
+      existing.push(point);
+      groupedPoints.set(vehicleKey, existing);
     }
 
-    const orderedStops: RouteStop[] = [];
-    let previousKey: string | null = null;
+    const groups: RouteGroup[] = [];
 
-    for (const point of pointsInRouteOrder) {
-      const roundedLat = roundCoordinate(point.latitude, ROUTE_PRECISION);
-      const roundedLng = roundCoordinate(point.longitude, ROUTE_PRECISION);
-      const currentKey = `${roundedLat}:${roundedLng}`;
+    for (const [vehicleId, grouped] of groupedPoints.entries()) {
+      const pointsInRouteOrder = [...grouped];
+      const hasUsableTime = pointsInRouteOrder.some((point) => point.eventTimeMs != null);
 
-      if (currentKey === previousKey) {
-        continue;
+      if (hasUsableTime) {
+        pointsInRouteOrder.sort((left, right) => {
+          const leftTime = left.eventTimeMs;
+          const rightTime = right.eventTimeMs;
+
+          if (leftTime == null && rightTime == null) {
+            return left.rowIndex - right.rowIndex;
+          }
+
+          if (leftTime == null) {
+            return 1;
+          }
+
+          if (rightTime == null) {
+            return -1;
+          }
+
+          if (leftTime !== rightTime) {
+            return leftTime - rightTime;
+          }
+
+          return left.rowIndex - right.rowIndex;
+        });
       }
 
-      orderedStops.push({
-        id: point.id,
-        latitude: point.latitude,
-        longitude: point.longitude,
-        vehicleId: point.vehicleId,
+      const stops: RouteStop[] = [];
+      let previousKey: string | null = null;
+
+      for (const point of pointsInRouteOrder) {
+        const roundedLat = roundCoordinate(point.latitude, ROUTE_PRECISION);
+        const roundedLng = roundCoordinate(point.longitude, ROUTE_PRECISION);
+        const currentKey = `${roundedLat}:${roundedLng}`;
+
+        if (currentKey === previousKey) {
+          continue;
+        }
+
+        stops.push({
+          id: point.id,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          vehicleId: point.vehicleId,
+        });
+        previousKey = currentKey;
+      }
+
+      groups.push({
+        vehicleId,
+        stops,
       });
-      previousKey = currentKey;
     }
 
-    return orderedStops;
+    return groups.sort((left, right) => right.stops.length - left.stops.length);
   }, [points]);
+
+  const routedStopCount = useMemo(
+    () => routeGroups.reduce((total, group) => total + group.stops.length, 0),
+    [routeGroups]
+  );
 
   async function pickCsv() {
     setError('');
@@ -589,15 +617,16 @@ export default function HomeScreen() {
           </Text>
         </View>
 
-        <ParkingMap hotspots={hotspots} routeStops={routeStops} />
+        <ParkingMap hotspots={hotspots} routeGroups={routeGroups} />
 
         <Text style={styles.mapNote}>
           Hotspots are grouped by nearby coordinates rounded to about 3 decimal places, roughly a
           city block scale. Larger circles mean more repeated stops at that location.
         </Text>
         <Text style={styles.mapNote}>
-          The route follows stop-time order (oldest to newest), then snaps to roads with a public
-          routing service. Consecutive duplicate GPS points are removed before routing.
+          Routes are built per truck (`vehicle_id`) in stop-time order (oldest to newest), then
+          snapped to roads with a public routing service. Consecutive duplicate GPS points are
+          removed before routing.
         </Text>
 
         <View style={styles.boundsRow}>
@@ -631,7 +660,8 @@ export default function HomeScreen() {
         <Text style={styles.sectionTitle}>Route Summary</Text>
         <View style={styles.boundsRow}>
           <Text style={styles.boundsText}>Uploaded points: {points.length}</Text>
-          <Text style={styles.boundsText}>Road-routed stops: {routeStops.length}</Text>
+          <Text style={styles.boundsText}>Vehicle routes: {routeGroups.length}</Text>
+          <Text style={styles.boundsText}>Road-routed stops: {routedStopCount}</Text>
           <Text style={styles.boundsText}>Hotspot groups: {hotspots.length}</Text>
         </View>
       </View>
