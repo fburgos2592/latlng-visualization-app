@@ -347,6 +347,8 @@ export default function HomeScreen() {
   const [fileName, setFileName] = useState('');
   const [tomtomApiKey, setTomtomApiKey] = useState('');
   const [truckProfile, setTruckProfile] = useState<TruckProfile>(DEFAULT_TRUCK_PROFILE);
+  const [darkMode, setDarkMode] = useState(false);
+  const theme = darkMode ? dark : light;
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
   const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
   const speedKey = useMemo(() => detectOptionalKey(rows, SPEED_ALIASES), [rows]);
@@ -575,145 +577,153 @@ export default function HomeScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.page}>
+    <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.pageBg }]}>
       <View style={styles.hero}>
-        <Text style={styles.eyebrow}>Static Web Export Ready</Text>
-        <Text style={styles.title}>CSV Latitude/Longitude Visualizer</Text>
-        <Text style={styles.subtitle}>
-          Upload a CSV and preview every valid coordinate in a browser-safe geographic plot that can
-          be exported to GitHub Pages.
+        <View style={styles.heroHeader}>
+          <View>
+            <Text style={[styles.logoMark, { color: theme.accent }]}>BALDOR</Text>
+            <Text style={[styles.logoSub, { color: theme.muted }]}>Specialty Foods</Text>
+          </View>
+          <Pressable onPress={() => setDarkMode((d) => !d)} style={[styles.themeToggle, { backgroundColor: theme.toggleBg }]}>
+            <Text style={[styles.themeToggleText, { color: theme.toggleText }]}>{darkMode ? '☀ Light' : '☾ Dark'}</Text>
+          </Pressable>
+        </View>
+        <Text style={[styles.title, { color: theme.titleText }]}>Truck Route Visualizer</Text>
+        <Text style={[styles.subtitle, { color: theme.muted }]}>
+          Upload a CSV and preview every valid coordinate with per-truck road-snapped routes.
         </Text>
       </View>
 
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
         <View style={styles.toolbar}>
-          <Pressable onPress={pickCsv} style={styles.button}>
+          <Pressable onPress={pickCsv} style={[styles.button, { backgroundColor: theme.accent }]}>
             <Text style={styles.buttonText}>Choose CSV</Text>
           </Pressable>
-          <View style={styles.metaBlock}>
-            <Text style={styles.metaLabel}>Rows</Text>
-            <Text style={styles.metaValue}>{rows.length}</Text>
+          <View style={[styles.metaBlock, { backgroundColor: theme.metaBg }]}>
+            <Text style={[styles.metaLabel, { color: theme.accent }]}>Rows</Text>
+            <Text style={[styles.metaValue, { color: theme.bodyText }]}>{rows.length}</Text>
           </View>
-          <View style={styles.metaBlock}>
-            <Text style={styles.metaLabel}>Valid points</Text>
-            <Text style={styles.metaValue}>{points.length}</Text>
+          <View style={[styles.metaBlock, { backgroundColor: theme.metaBg }]}>
+            <Text style={[styles.metaLabel, { color: theme.accent }]}>Valid points</Text>
+            <Text style={[styles.metaValue, { color: theme.bodyText }]}>{points.length}</Text>
           </View>
-          <View style={styles.metaBlock}>
-            <Text style={styles.metaLabel}>Skipped rows</Text>
-            <Text style={styles.metaValue}>{invalidRowCount}</Text>
+          <View style={[styles.metaBlock, { backgroundColor: theme.metaBg }]}>
+            <Text style={[styles.metaLabel, { color: theme.accent }]}>Skipped rows</Text>
+            <Text style={[styles.metaValue, { color: theme.bodyText }]}>{invalidRowCount}</Text>
           </View>
         </View>
 
-        <Text style={styles.helpText}>
-          Expected columns: <Text style={styles.helpStrong}>lat,lng</Text>,{' '}
-          <Text style={styles.helpStrong}>latitude,longitude</Text>, or{' '}
-          <Text style={styles.helpStrong}>vehicle_lat,vehicle_lng</Text>. CSV and Excel uploads are supported.
+        <Text style={[styles.helpText, { color: theme.muted }]}>
+          Expected columns: <Text style={[styles.helpStrong, { color: theme.bodyText }]}>lat,lng</Text>,{' '}
+          <Text style={[styles.helpStrong, { color: theme.bodyText }]}>latitude,longitude</Text>, or{' '}
+          <Text style={[styles.helpStrong, { color: theme.bodyText }]}>vehicle_lat,vehicle_lng</Text>. CSV and Excel uploads are supported.
         </Text>
-        <Text style={styles.helpText}>
+        <Text style={[styles.helpText, { color: theme.muted }]}>
           Best fit for GitHub Pages: {Platform.OS === 'web' ? 'browser upload is ready here' : 'open the web build to test browser uploads'}.
         </Text>
-        {fileName ? <Text style={styles.fileName}>Loaded: {fileName}</Text> : null}
+        {fileName ? <Text style={[styles.fileName, { color: theme.bodyText }]}>Loaded: {fileName}</Text> : null}
         {coordinateKeys.latitudeKey && coordinateKeys.longitudeKey ? (
-          <Text style={styles.helpText}>
-            Detected coordinate columns: <Text style={styles.helpStrong}>{coordinateKeys.latitudeKey}</Text> and{' '}
-            <Text style={styles.helpStrong}>{coordinateKeys.longitudeKey}</Text>
+          <Text style={[styles.helpText, { color: theme.muted }]}>
+            Detected coordinate columns: <Text style={[styles.helpStrong, { color: theme.bodyText }]}>{coordinateKeys.latitudeKey}</Text> and{' '}
+            <Text style={[styles.helpStrong, { color: theme.bodyText }]}>{coordinateKeys.longitudeKey}</Text>
           </Text>
         ) : null}
         {startTimeKey || endTimeKey || routeTimeKey ? (
-          <Text style={styles.helpText}>
-            Route order uses stop times: <Text style={styles.helpStrong}>{startTimeKey ?? 'n/a'}</Text>
+          <Text style={[styles.helpText, { color: theme.muted }]}>
+            Route order uses stop times: <Text style={[styles.helpStrong, { color: theme.bodyText }]}>{startTimeKey ?? 'n/a'}</Text>
             {' '}to{' '}
-            <Text style={styles.helpStrong}>{endTimeKey ?? 'n/a'}</Text>
+            <Text style={[styles.helpStrong, { color: theme.bodyText }]}>{endTimeKey ?? 'n/a'}</Text>
             {routeTimeKey && routeTimeKey !== startTimeKey && routeTimeKey !== endTimeKey ? (
               <>
-                {' '}with fallback time column <Text style={styles.helpStrong}>{routeTimeKey}</Text>
+                {' '}with fallback time column <Text style={[styles.helpStrong, { color: theme.bodyText }]}>{routeTimeKey}</Text>
               </>
             ) : null}
           </Text>
         ) : (
-          <Text style={styles.helpText}>
+          <Text style={[styles.helpText, { color: theme.muted }]}>
             No time column detected. Route order is currently based on uploaded row order.
           </Text>
         )}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
 
-      <View style={styles.card}>
+      <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
         <View style={styles.plotHeader}>
-          <Text style={styles.sectionTitle}>Parking Map</Text>
-          <Text style={styles.sectionCopy}>
+          <Text style={[styles.sectionTitle, { color: theme.titleText }]}>Parking Map</Text>
+          <Text style={[styles.sectionCopy, { color: theme.muted }]}>
             Repeated coordinates are grouped into parking hotspots so the places your trucks return
             to most often stand out on the map.
           </Text>
         </View>
 
-        <View style={styles.routingConfig}>
-          <Text style={styles.configTitle}>TomTom Truck Routing Settings</Text>
-          <Text style={styles.helpText}>
+        <View style={[styles.routingConfig, { backgroundColor: theme.routingBg, borderColor: theme.routingBorder }]}>
+          <Text style={[styles.configTitle, { color: theme.titleText }]}>TomTom Truck Routing Settings</Text>
+          <Text style={[styles.helpText, { color: theme.muted }]}>
             Paste a TomTom API key to route trucks on commercial-allowed roads with height/weight restrictions.
           </Text>
           <TextInput
             value={tomtomApiKey}
             onChangeText={setTomtomApiKey}
-            style={styles.input}
+            style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
             placeholder="TomTom API key"
+            placeholderTextColor={theme.muted}
             autoCapitalize="none"
             autoCorrect={false}
           />
           <View style={styles.inputsRow}>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Weight kg</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Weight kg</Text>
               <TextInput
                 value={String(truckProfile.vehicleWeightKg)}
                 onChangeText={(value) => updateTruckProfile('vehicleWeightKg', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Axle weight kg</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Axle weight kg</Text>
               <TextInput
                 value={String(truckProfile.vehicleAxleWeightKg)}
                 onChangeText={(value) => updateTruckProfile('vehicleAxleWeightKg', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Axles</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Axles</Text>
               <TextInput
                 value={String(truckProfile.vehicleNumberOfAxles)}
                 onChangeText={(value) => updateTruckProfile('vehicleNumberOfAxles', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
           </View>
           <View style={styles.inputsRow}>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Length m</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Length m</Text>
               <TextInput
                 value={String(truckProfile.vehicleLengthM)}
                 onChangeText={(value) => updateTruckProfile('vehicleLengthM', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Width m</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Width m</Text>
               <TextInput
                 value={String(truckProfile.vehicleWidthM)}
                 onChangeText={(value) => updateTruckProfile('vehicleWidthM', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
             <View style={styles.inputBlock}>
-              <Text style={styles.inputLabel}>Height m</Text>
+              <Text style={[styles.inputLabel, { color: theme.muted }]}>Height m</Text>
               <TextInput
                 value={String(truckProfile.vehicleHeightM)}
                 onChangeText={(value) => updateTruckProfile('vehicleHeightM', value)}
-                style={styles.input}
+                style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
                 keyboardType="numeric"
               />
             </View>
@@ -727,86 +737,133 @@ export default function HomeScreen() {
           truckProfile={truckProfile}
         />
 
-        <Text style={styles.mapNote}>
+        <Text style={[styles.mapNote, { color: theme.muted }]}>
           Hotspots are grouped by nearby coordinates rounded to about 3 decimal places, roughly a
           city block scale. Larger circles mean more repeated stops at that location.
         </Text>
-        <Text style={styles.mapNote}>
+        <Text style={[styles.mapNote, { color: theme.muted }]}>
           Routes are built per truck (`vehicle_id`) in stop-time order (oldest to newest), then
           snapped to roads using TomTom truck routing. Consecutive duplicate GPS points are
           removed before routing.
         </Text>
 
         <View style={styles.boundsRow}>
-          <Text style={styles.boundsText}>Min lat: {formatCoordinate(bounds.minLat)}</Text>
-          <Text style={styles.boundsText}>Max lat: {formatCoordinate(bounds.maxLat)}</Text>
-          <Text style={styles.boundsText}>Min lng: {formatCoordinate(bounds.minLng)}</Text>
-          <Text style={styles.boundsText}>Max lng: {formatCoordinate(bounds.maxLng)}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Min lat: {formatCoordinate(bounds.minLat)}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Max lat: {formatCoordinate(bounds.maxLat)}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Min lng: {formatCoordinate(bounds.minLng)}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Max lng: {formatCoordinate(bounds.maxLng)}</Text>
         </View>
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Top Parking Hotspots</Text>
+      <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
+        <Text style={[styles.sectionTitle, { color: theme.titleText }]}>Top Parking Hotspots</Text>
         {hotspots.slice(0, 12).map((hotspot, index) => (
-          <View key={hotspot.id} style={styles.previewRow}>
-            <Text style={styles.previewIndex}>#{index + 1}</Text>
-            <Text style={styles.previewValue}>Lat {formatCoordinate(hotspot.latitude)}</Text>
-            <Text style={styles.previewValue}>Lng {formatCoordinate(hotspot.longitude)}</Text>
-            <Text style={styles.previewValue}>Stops {hotspot.count}</Text>
-            <Text style={styles.previewValue}>Vehicles {hotspot.vehicleCount}</Text>
+          <View key={hotspot.id} style={[styles.previewRow, { borderBottomColor: theme.divider }]}>
+            <Text style={[styles.previewIndex, { color: theme.accent }]}>#{index + 1}</Text>
+            <Text style={[styles.previewValue, { color: theme.bodyText }]}>Lat {formatCoordinate(hotspot.latitude)}</Text>
+            <Text style={[styles.previewValue, { color: theme.bodyText }]}>Lng {formatCoordinate(hotspot.longitude)}</Text>
+            <Text style={[styles.previewValue, { color: theme.bodyText }]}>Stops {hotspot.count}</Text>
+            <Text style={[styles.previewValue, { color: theme.bodyText }]}>Vehicles {hotspot.vehicleCount}</Text>
             {hotspot.averageSpeed != null ? (
-              <Text style={styles.previewValue}>Avg speed {hotspot.averageSpeed.toFixed(2)}</Text>
+              <Text style={[styles.previewValue, { color: theme.bodyText }]}>Avg speed {hotspot.averageSpeed.toFixed(2)}</Text>
             ) : null}
           </View>
         ))}
         {hotspots.length > 12 ? (
-          <Text style={styles.moreText}>Showing first 12 of {hotspots.length} hotspot groups.</Text>
+          <Text style={[styles.moreText, { color: theme.muted }]}>Showing first 12 of {hotspots.length} hotspot groups.</Text>
         ) : null}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Route Summary</Text>
+      <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
+        <Text style={[styles.sectionTitle, { color: theme.titleText }]}>Route Summary</Text>
         <View style={styles.boundsRow}>
-          <Text style={styles.boundsText}>Uploaded points: {points.length}</Text>
-          <Text style={styles.boundsText}>Vehicle routes: {routeGroups.length}</Text>
-          <Text style={styles.boundsText}>Road-routed stops: {routedStopCount}</Text>
-          <Text style={styles.boundsText}>Hotspot groups: {hotspots.length}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Uploaded points: {points.length}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Vehicle routes: {routeGroups.length}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Road-routed stops: {routedStopCount}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Hotspot groups: {hotspots.length}</Text>
         </View>
       </View>
     </ScrollView>
   );
 }
 
+const light = {
+  pageBg: '#f4f7fb',
+  cardBg: '#ffffff',
+  accent: '#0f766e',
+  titleText: '#0f172a',
+  bodyText: '#0f172a',
+  muted: '#475569',
+  metaBg: '#ecfeff',
+  inputBg: '#ffffff',
+  inputBorder: '#cbd5e1',
+  routingBg: '#f8fafc',
+  routingBorder: '#dbeafe',
+  divider: '#e2e8f0',
+  toggleBg: '#0f172a',
+  toggleText: '#f8fafc',
+};
+
+const dark = {
+  pageBg: '#0f172a',
+  cardBg: '#1e293b',
+  accent: '#2dd4bf',
+  titleText: '#f1f5f9',
+  bodyText: '#e2e8f0',
+  muted: '#94a3b8',
+  metaBg: '#134e4a',
+  inputBg: '#0f172a',
+  inputBorder: '#334155',
+  routingBg: '#1e293b',
+  routingBorder: '#1d4ed8',
+  divider: '#334155',
+  toggleBg: '#f1f5f9',
+  toggleText: '#0f172a',
+};
+
 const styles = StyleSheet.create({
   page: {
     padding: 20,
     gap: 16,
-    backgroundColor: '#f4f7fb',
   },
   hero: {
     paddingVertical: 12,
     gap: 8,
   },
-  eyebrow: {
-    color: '#0f766e',
-    fontSize: 12,
+  heroHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  logoMark: {
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 3,
+  },
+  logoSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    letterSpacing: 1.5,
+  },
+  themeToggle: {
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  themeToggleText: {
+    fontSize: 13,
     fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
   },
   title: {
-    color: '#0f172a',
     fontSize: 32,
     fontWeight: '800',
   },
   subtitle: {
-    color: '#475569',
     fontSize: 15,
     lineHeight: 22,
     maxWidth: 760,
   },
   card: {
-    backgroundColor: '#ffffff',
     borderRadius: 20,
     padding: 18,
     gap: 12,
@@ -823,7 +880,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   button: {
-    backgroundColor: '#0f766e',
     borderRadius: 999,
     paddingHorizontal: 18,
     paddingVertical: 12,
@@ -836,37 +892,31 @@ const styles = StyleSheet.create({
   metaBlock: {
     minWidth: 96,
     borderRadius: 14,
-    backgroundColor: '#ecfeff',
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 4,
   },
   metaLabel: {
-    color: '#0f766e',
     fontSize: 12,
     fontWeight: '600',
   },
   metaValue: {
-    color: '#0f172a',
     fontSize: 20,
     fontWeight: '800',
   },
   helpText: {
-    color: '#475569',
     fontSize: 14,
     lineHeight: 20,
   },
   helpStrong: {
-    color: '#0f172a',
     fontWeight: '700',
   },
   fileName: {
-    color: '#0f172a',
     fontSize: 14,
     fontWeight: '600',
   },
   error: {
-    color: '#b91c1c',
+    color: '#f87171',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -874,30 +924,24 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   sectionTitle: {
-    color: '#0f172a',
     fontSize: 22,
     fontWeight: '800',
   },
   sectionCopy: {
-    color: '#64748b',
     fontSize: 14,
     lineHeight: 20,
   },
   mapNote: {
-    color: '#475569',
     fontSize: 14,
     lineHeight: 20,
   },
   routingConfig: {
     borderWidth: 1,
-    borderColor: '#dbeafe',
     borderRadius: 12,
     padding: 12,
     gap: 10,
-    backgroundColor: '#f8fafc',
   },
   configTitle: {
-    color: '#0f172a',
     fontSize: 16,
     fontWeight: '700',
   },
@@ -912,19 +956,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   inputLabel: {
-    color: '#475569',
     fontSize: 12,
     fontWeight: '600',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#cbd5e1',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: '#0f172a',
-    backgroundColor: '#ffffff',
   },
   boundsRow: {
     flexDirection: 'row',
@@ -932,7 +972,6 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   boundsText: {
-    color: '#334155',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -941,21 +980,17 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
     paddingVertical: 10,
   },
   previewIndex: {
     minWidth: 40,
-    color: '#0f766e',
     fontSize: 13,
     fontWeight: '700',
   },
   previewValue: {
-    color: '#334155',
     fontSize: 14,
   },
   moreText: {
-    color: '#64748b',
     fontSize: 13,
     fontStyle: 'italic',
   },
