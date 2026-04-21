@@ -21,7 +21,6 @@ type ParkingMapProps = {
       vehicleId: string | null;
     }>;
   }>;
-  tomtomApiKey: string;
   truckProfile: {
     vehicleCommercial: boolean;
     vehicleWeightKg: number;
@@ -33,7 +32,7 @@ type ParkingMapProps = {
   };
 };
 
-export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey }: ParkingMapProps) {
+export default function ParkingMap({ hotspots, routeGroups }: ParkingMapProps) {
   const stopCount = routeGroups.reduce((total, group) => total + group.stops.length, 0);
 
   return (
@@ -41,8 +40,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey }: Park
       <Text style={styles.title}>Map preview is available on the web build.</Text>
       <Text style={styles.copy}>
         Upload the same file in the GitHub Pages site to inspect {hotspots.length} hotspot groups and
-        TomTom truck routes across {stopCount} ordered stops on an interactive map. API key set:{' '}
-        {tomtomApiKey.trim().length > 0 ? 'yes' : 'no'}.
+        truck routes across {stopCount} ordered stops on an interactive map.
       </Text>
     </View>
   );

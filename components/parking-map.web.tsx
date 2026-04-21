@@ -22,7 +22,6 @@ type ParkingMapProps = {
       vehicleId: string | null;
     }>;
   }>;
-  tomtomApiKey: string;
   truckProfile: {
     vehicleCommercial: boolean;
     vehicleWeightKg: number;
@@ -163,6 +162,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
   const [routeStatus, setRouteStatus] = useState('');
+  const [routingMode, setRoutingMode] = useState<'idle' | 'api' | 'fallback' | 'mixed'>('idle');
 
   useEffect(() => {
     let disposed = false;
@@ -197,6 +197,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
       }
 
       setRouteStatus('');
+      setRoutingMode('idle');
 
       if (hotspots.length === 0) {
         mapRef.current.setView(DEFAULT_CENTER, 9);
@@ -230,7 +231,8 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
         .filter((group) => group.stops.length >= 2)
         .slice(0, MAX_ROUTE_GROUPS);
       const statusMessages: string[] = [];
-      const hasApiKey = true; // key lives on the Render proxy server
+      let apiRenderedCount = 0;
+      let fallbackRenderedCount = 0;
 
       for (const routeGroup of groupsToRender) {
         const preparedStops = sampleStops(routeGroup.stops, MAX_ROUTE_STOPS);
@@ -248,10 +250,6 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
         }
 
         try {
-          if (!hasApiKey) {
-            continue;
-          }
-
           const routeChunks = chunkStops(preparedStops, TOMTOM_CHUNK_SIZE);
           const routeCoordinates: Array<[number, number]> = [];
 
@@ -312,13 +310,17 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
               weight: 5,
               opacity: 0.9,
             });
+            apiRenderedCount += 1;
+          } else {
+            fallbackRenderedCount += 1;
           }
 
           if (routeGroup.stops.length > MAX_ROUTE_STOPS) {
             statusMessages.push(`${label}: sampled ${MAX_ROUTE_STOPS} of ${routeGroup.stops.length} stops.`);
           }
         } catch {
-          statusMessages.push(`${label}: TomTom route unavailable, showing straight-line fallback.`);
+          fallbackRenderedCount += 1;
+          statusMessages.push(`${label}: Routing API unavailable, showing straight-line fallback.`);
         }
       }
 
@@ -329,7 +331,15 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
       if (statusMessages.length > 0) {
         setRouteStatus(statusMessages.join(' '));
       } else if (groupsToRender.length > 0) {
-        setRouteStatus('TomTom truck routing is active per vehicle_id, each route drawn from red start to green end.');
+        setRouteStatus('Routing API is active per vehicle_id, each route drawn from red start to green end.');
+      }
+
+      if (apiRenderedCount > 0 && fallbackRenderedCount > 0) {
+        setRoutingMode('mixed');
+      } else if (apiRenderedCount > 0) {
+        setRoutingMode('api');
+      } else if (groupsToRender.length > 0) {
+        setRoutingMode('fallback');
       }
 
       if (hotspots.length === 1) {
@@ -347,7 +357,7 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
     return () => {
       disposed = true;
     };
-  }, [hotspots, routeGroups, tomtomApiKey, truckProfile]);
+  }, [hotspots, routeGroups, truckProfile]);
 
   useEffect(() => {
     return () => {
@@ -361,6 +371,28 @@ export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckP
 
   return (
     <View style={styles.shell}>
+      <View style={styles.badgeWrap}>
+        <Text
+          style={[
+            styles.badge,
+            routingMode === 'api'
+              ? styles.badgeApi
+              : routingMode === 'fallback'
+              ? styles.badgeFallback
+              : routingMode === 'mixed'
+              ? styles.badgeMixed
+              : styles.badgeIdle,
+          ]}
+        >
+          {routingMode === 'api'
+            ? 'Routing: API'
+            : routingMode === 'fallback'
+            ? 'Routing: Fallback'
+            : routingMode === 'mixed'
+            ? 'Routing: Mixed'
+            : 'Routing: Waiting'}
+        </Text>
+      </View>
       <View ref={containerRef} style={styles.map} />
       {routeStatus ? <Text style={styles.status}>{routeStatus}</Text> : null}
     </View>
@@ -379,6 +411,36 @@ const styles = StyleSheet.create({
   map: {
     flex: 1,
     minHeight: 460,
+  },
+  badgeWrap: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    zIndex: 500,
+  },
+  badge: {
+    fontSize: 12,
+    fontWeight: '800',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    overflow: 'hidden',
+  },
+  badgeApi: {
+    color: '#ecfeff',
+    backgroundColor: 'rgba(13, 148, 136, 0.95)',
+  },
+  badgeFallback: {
+    color: '#f8fafc',
+    backgroundColor: 'rgba(185, 28, 28, 0.95)',
+  },
+  badgeMixed: {
+    color: '#172554',
+    backgroundColor: 'rgba(250, 204, 21, 0.95)',
+  },
+  badgeIdle: {
+    color: '#0f172a',
+    backgroundColor: 'rgba(255,255,255,0.92)',
   },
   status: {
     position: 'absolute',

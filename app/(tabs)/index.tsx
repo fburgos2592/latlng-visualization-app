@@ -345,10 +345,10 @@ export default function HomeScreen() {
   const [rows, setRows] = useState<CsvRow[]>([]);
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
-  const [tomtomApiKey, setTomtomApiKey] = useState('');
   const [truckProfile, setTruckProfile] = useState<TruckProfile>(DEFAULT_TRUCK_PROFILE);
   const [darkMode, setDarkMode] = useState(false);
   const theme = darkMode ? dark : light;
+
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
   const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
   const speedKey = useMemo(() => detectOptionalKey(rows, SPEED_ALIASES), [rows]);
@@ -592,6 +592,11 @@ export default function HomeScreen() {
         <Text style={[styles.subtitle, { color: theme.muted }]}>
           Upload a CSV and preview every valid coordinate with per-truck road-snapped routes.
         </Text>
+        <View style={styles.heroChips}>
+          <Text style={[styles.heroChip, { backgroundColor: theme.chipBg, color: theme.chipText }]}>Hotspot Intelligence</Text>
+          <Text style={[styles.heroChip, { backgroundColor: theme.chipBg, color: theme.chipText }]}>Truck-Grade Routing</Text>
+          <Text style={[styles.heroChip, { backgroundColor: theme.chipBg, color: theme.chipText }]}>Fallback Safe</Text>
+        </View>
       </View>
 
       <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
@@ -657,19 +662,16 @@ export default function HomeScreen() {
         </View>
 
         <View style={[styles.routingConfig, { backgroundColor: theme.routingBg, borderColor: theme.routingBorder }]}>
-          <Text style={[styles.configTitle, { color: theme.titleText }]}>TomTom Truck Routing Settings</Text>
+          <Text style={[styles.configTitle, { color: theme.titleText }]}>Truck Routing Profile</Text>
           <Text style={[styles.helpText, { color: theme.muted }]}>
-            Paste a TomTom API key to route trucks on commercial-allowed roads with height/weight restrictions.
+            Routes use your hosted API service. These dimensions tune weight/axle and clearance constraints.
           </Text>
-          <TextInput
-            value={tomtomApiKey}
-            onChangeText={setTomtomApiKey}
-            style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
-            placeholder="TomTom API key"
-            placeholderTextColor={theme.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <View style={styles.routingLegendRow}>
+            <Text style={[styles.routingLegend, { color: theme.bodyText }]}>Routing badge:</Text>
+            <Text style={[styles.routingPillApi]}>API</Text>
+            <Text style={[styles.routingPillFallback]}>Fallback</Text>
+            <Text style={[styles.routingPillMixed]}>Mixed</Text>
+          </View>
           <View style={styles.inputsRow}>
             <View style={styles.inputBlock}>
               <Text style={[styles.inputLabel, { color: theme.muted }]}>Weight kg</Text>
@@ -733,7 +735,6 @@ export default function HomeScreen() {
         <ParkingMap
           hotspots={hotspots}
           routeGroups={routeGroups}
-          tomtomApiKey={tomtomApiKey}
           truckProfile={truckProfile}
         />
 
@@ -743,7 +744,7 @@ export default function HomeScreen() {
         </Text>
         <Text style={[styles.mapNote, { color: theme.muted }]}>
           Routes are built per truck (`vehicle_id`) in stop-time order (oldest to newest), then
-          snapped to roads using TomTom truck routing. Consecutive duplicate GPS points are
+          snapped to roads using your hosted routing API. Consecutive duplicate GPS points are
           removed before routing.
         </Text>
 
@@ -788,37 +789,41 @@ export default function HomeScreen() {
 }
 
 const light = {
-  pageBg: '#f4f7fb',
+  pageBg: '#f3f6fb',
   cardBg: '#ffffff',
   accent: '#0f766e',
-  titleText: '#0f172a',
+  titleText: '#0b132b',
   bodyText: '#0f172a',
-  muted: '#475569',
-  metaBg: '#ecfeff',
+  muted: '#4b5563',
+  metaBg: '#e8f7f5',
   inputBg: '#ffffff',
   inputBorder: '#cbd5e1',
-  routingBg: '#f8fafc',
-  routingBorder: '#dbeafe',
+  routingBg: '#f6fbff',
+  routingBorder: '#c7e6ff',
   divider: '#e2e8f0',
-  toggleBg: '#0f172a',
+  toggleBg: '#0b132b',
   toggleText: '#f8fafc',
+  chipBg: '#dcfce7',
+  chipText: '#166534',
 };
 
 const dark = {
-  pageBg: '#0f172a',
-  cardBg: '#1e293b',
+  pageBg: '#0b1220',
+  cardBg: '#151f33',
   accent: '#2dd4bf',
-  titleText: '#f1f5f9',
-  bodyText: '#e2e8f0',
-  muted: '#94a3b8',
-  metaBg: '#134e4a',
-  inputBg: '#0f172a',
-  inputBorder: '#334155',
-  routingBg: '#1e293b',
-  routingBorder: '#1d4ed8',
-  divider: '#334155',
-  toggleBg: '#f1f5f9',
-  toggleText: '#0f172a',
+  titleText: '#f8fafc',
+  bodyText: '#dbe7ff',
+  muted: '#9fb4d7',
+  metaBg: '#123b46',
+  inputBg: '#0d1728',
+  inputBorder: '#294264',
+  routingBg: '#102033',
+  routingBorder: '#1f4f87',
+  divider: '#2a3d5c',
+  toggleBg: '#f8fafc',
+  toggleText: '#0b1220',
+  chipBg: '#114a3b',
+  chipText: '#a7f3d0',
 };
 
 const styles = StyleSheet.create({
@@ -827,8 +832,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   hero: {
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: 14,
+    gap: 10,
   },
   heroHeader: {
     flexDirection: 'row',
@@ -850,23 +855,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   title: {
-    fontSize: 32,
+    fontSize: 36,
     fontWeight: '800',
+    letterSpacing: 0.2,
   },
   subtitle: {
     fontSize: 15,
-    lineHeight: 22,
+    lineHeight: 23,
     maxWidth: 760,
   },
+  heroChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  heroChip: {
+    fontSize: 12,
+    fontWeight: '700',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    overflow: 'hidden',
+  },
   card: {
-    borderRadius: 20,
+    borderRadius: 22,
     padding: 18,
     gap: 12,
     shadowColor: '#0f172a',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
   },
   toolbar: {
     flexDirection: 'row',
@@ -932,9 +951,49 @@ const styles = StyleSheet.create({
   },
   routingConfig: {
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 16,
+    padding: 14,
     gap: 10,
+  },
+  routingLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+  },
+  routingLegend: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  routingPillApi: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#ecfeff',
+    backgroundColor: '#0d9488',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  routingPillFallback: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#f8fafc',
+    backgroundColor: '#b91c1c',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  routingPillMixed: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#172554',
+    backgroundColor: '#facc15',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    overflow: 'hidden',
   },
   configTitle: {
     fontSize: 16,
