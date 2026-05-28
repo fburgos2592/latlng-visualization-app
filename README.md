@@ -1,98 +1,79 @@
-# Truck Route Intelligence Dashboard
+# LatLng Visualization App
 
-Interactive web dashboard for operational route analysis. The app ingests truck telemetry files, detects parking hotspots, and renders per-vehicle routes with truck-aware road snapping via a secure backend proxy.
+Web app for route and arrival-quality analysis, with a dedicated Impact experience for invoice vs arrived coordinate mismatches.
 
 ## Live Links
 
 - Frontend (GitHub Pages): https://fburgos2592.github.io/latlng-visualization-app/
-- Routing API proxy (Render): https://latlng-visualization-app.onrender.com/
+- Routing proxy (Render): https://latlng-visualization-app.onrender.com/
 
-## Executive Summary
+## What The App Does
 
-This project provides a practical decision-support layer for fleet operations:
+The app currently ships with a tabbed workflow:
 
-- Converts raw GPS rows into route intelligence in-browser.
-- Highlights repeat stop behavior (parking hotspots) for route and productivity analysis.
-- Uses truck-aware routing (height/weight/axle constraints) instead of passenger-car defaults.
-- Protects the routing API key behind a backend proxy (no key exposure in browser code).
-- Includes graceful fallback behavior so maps remain usable if upstream routing is unavailable.
+- Home: upload route telemetry and inspect mapped route behavior.
+- Explore: additional map exploration views.
+- Impact: "Arrival Proximity Impact Lab" for discrepancy analysis between invoice and arrived coordinates.
 
-## Core Capabilities
+The Impact tab is designed for operational triage:
 
-- Upload support for CSV and Excel files (`.csv`, `.xls`, `.xlsx`).
-- Automatic coordinate detection for common schemas:
-	- `lat` / `lng`
-	- `latitude` / `longitude`
-	- `vehicle_lat` / `vehicle_lng`
-- Optional field inference for:
-	- `vehicle_id`
-	- `speed`
-	- multiple timestamp aliases (`reading_start`, `reading_finish`, `timestamp`, etc.)
-- Per-vehicle route reconstruction ordered by event time (or row order fallback).
-- Hotspot clustering to reduce GPS jitter and surface recurring stop locations.
-- Truck profile controls for routing constraints:
-	- vehicle weight
-	- axle weight
-	- number of axles
-	- length, width, height
-- On-map routing mode indicator:
-	- `Routing: API`
-	- `Routing: Fallback`
-	- `Routing: Mixed`
+- Upload CSV or Excel discrepancy files.
+- Auto-detect coordinate and key business columns.
+- Rank top offenders by mismatch severity.
+- Filter by warehouse (`wh_id`) and route/offender search.
+- View mismatch lines on map (invoice point to arrived point).
+- See customer name and arrived/invoice time context in highlights.
+- Page through large offender sets.
+
+## Impact Input Expectations
+
+The parser supports aliases and fuzzy matching for common column names.
+
+Primary location fields:
+
+- Invoice latitude: `lat`, `invoice_lat`, `invoice_latitude`
+- Invoice longitude: `lng`, `lon`, `long`, `invoice_lng`, `invoice_longitude`
+- Arrived latitude: `arrived_lat`, `arrival_lat`, `arrive_lat`
+- Arrived longitude: `arrived_lng`, `arrived_lon`, `arrival_lng`, `arrive_lng`
+
+Common metadata fields:
+
+- Warehouse: `wh_id`, `warehouse_id`, `distribution_center`, `dc_id`, `dc`
+- Offender/route grouping: `route`, `driver_id`, `vehicle_id`, `truck_id`, `unit_id`
+- Invoice ID: `invoice`, `invoice_id`, `order_id`
+- Customer: `customer_name`, `customer`, `account_name`, `store_name`
+- Time context: `invoice_time`, `arrived_time`, `arrival_time`, `arrived_at`
 
 ## Architecture
 
-### Frontend (static)
+Frontend:
 
-- Hosted on GitHub Pages.
-- Built with Expo Router + React Native Web + Leaflet.
-- Renders maps using OpenStreetMap tiles.
-- Calls backend proxy endpoint for routing.
+- Expo Router + React Native Web
+- Static export hosted on GitHub Pages
+- Leaflet-based web map rendering
 
-### Backend proxy (server)
+Backend proxy:
 
-- Hosted on Render (Node + Express).
+- Node + Express service in `server/`
 - Endpoint: `GET /route`
-- Accepts query params such as:
-	- `waypoints` (`lat,lng:lat,lng:...`)
-	- `travelMode`, `vehicleWeight`, `vehicleHeight`, etc.
-- Injects `TOMTOM_API_KEY` from server environment.
-- Proxies requests to TomTom Routing API and returns JSON payloads to frontend.
+- Proxies TomTom route requests using server-side `TOMTOM_API_KEY`
 
-## Security Posture
+## Security
 
-- API key is server-side only (`TOMTOM_API_KEY` on Render).
-- No sensitive key in frontend bundle.
-- Browser traffic goes to Render proxy, not directly to TomTom with embedded credentials.
-- `.env` remains local/private and is not committed.
-
-## Routing Behavior
-
-- Primary path: truck-aware route geometry from proxy/API.
-- Fallback path: dashed straight-line segments per vehicle when routing fails.
-- Mixed mode: some vehicles routed via API, others shown as fallback.
-
-This ensures map continuity even during API cold starts or temporary network issues.
+- `TOMTOM_API_KEY` stays on the server only.
+- No API key is embedded in frontend assets.
+- Keep `server/.env` local/private.
 
 ## Local Development
 
-### Frontend
+Frontend:
 
 ```bash
 npm install
 npm run web
 ```
 
-Windows session variant used in this repo:
-
-```powershell
-$env:Path = "C:\Program Files\nodejs;" + $env:Path
-Set-Location "C:\Users\FBurgos\Documents\latlng-visualization-app"
-& "C:\Program Files\nodejs\npm.cmd" install
-& "C:\Program Files\nodejs\npm.cmd" run web
-```
-
-### Backend proxy
+Backend:
 
 ```bash
 cd server
@@ -107,51 +88,40 @@ TOMTOM_API_KEY=your_key_here
 PORT=3001
 ```
 
-## Build and Deploy
+## Build And Deploy
 
-### Frontend static export
+Export static web build:
 
 ```bash
 npm run export:web
 ```
 
-### Publish to GitHub Pages
+Publish GitHub Pages build:
 
 ```bash
 npm run deploy
 ```
 
-`deploy` runs `predeploy` (`expo export -p web`) and publishes `dist` to `gh-pages`.
-
-### Backend deployment (Render)
-
-- Service type: Web Service
-- Root directory: `server`
-- Build command: `npm install`
-- Start command: `npm start`
-- Environment variable: `TOMTOM_API_KEY`
+`deploy` runs `expo export -p web` and publishes `dist` to `gh-pages`.
 
 ## Tech Stack
 
 - Expo Router
-- React Native Web
+- React Native + React Native Web
 - Leaflet
-- OpenStreetMap
-- Express + CORS + dotenv
-- TomTom Routing API (truck mode)
 - Papa Parse
 - SheetJS (`xlsx`)
+- Express + CORS + dotenv
+- TomTom Routing API (via proxy)
 
-## Known Constraints
+## Notes
 
-- Render free tier may cold-start after idle periods.
-- Very large stop sets are sampled to stay responsive and within routing limits.
-- Hotspot detection is coordinate-cluster based; dwell-time heuristics are not yet applied.
+- On GitHub Pages, browser cache can delay visual updates. Hard refresh after deploy if changes do not appear immediately.
+- Large files are supported, but keeping only required columns improves parsing speed.
 
-## Next Iteration Ideas
+## Recent Web Updates
 
-- Add date/time filters and route playback.
-- Add dwell-time-based parking confidence scoring.
-- Add per-vehicle toggle and compare mode.
-- Persist user-selected truck profiles.
-- Add optional analytics export for downstream BI.
+- Bottom tab navigation was tuned for Windows/Edge viewport behavior.
+- Home, Explore, and Impact labels are restored and visible on web.
+- Web tab icons use explicit Material icon names for reliable rendering.
+- Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.
