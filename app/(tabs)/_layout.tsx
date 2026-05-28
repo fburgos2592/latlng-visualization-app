@@ -24,6 +24,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="geo-diff"
+        options={{
+          title: 'Geo Diff',
+          tabBarIcon: ({ color }) => <IconSymbol size={28} name="arrow.left.and.right" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="explore"
         options={{
           title: 'Explore',
