@@ -21,12 +21,13 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarShowLabel: Platform.OS !== 'web',
+        tabBarShowLabel: true,
+        tabBarLabelPosition: Platform.OS === 'web' ? 'beside-icon' : 'below-icon',
         tabBarStyle: {
-          height: Platform.OS === 'web' ? 72 : baseTabBarHeight + tabBarBottomPadding,
-          minHeight: Platform.OS === 'web' ? 72 : baseTabBarHeight + tabBarBottomPadding,
+          height: Platform.OS === 'web' ? 56 : baseTabBarHeight + tabBarBottomPadding,
+          minHeight: Platform.OS === 'web' ? 56 : baseTabBarHeight + tabBarBottomPadding,
           bottom: Platform.OS === 'web' ? 12 : 0,
-          paddingTop: Platform.OS === 'web' ? 6 : 4,
+          paddingTop: Platform.OS === 'web' ? 4 : 4,
           paddingBottom: tabBarBottomPadding,
         },
         tabBarItemStyle: {
@@ -37,7 +38,6 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarLabel: Platform.OS === 'web' ? () => null : 'Home',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
         }}
       />
@@ -45,7 +45,6 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: 'Explore',
-          tabBarLabel: Platform.OS === 'web' ? () => null : 'Explore',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
         }}
       />
@@ -53,7 +52,6 @@ export default function TabLayout() {
         name="impact"
         options={{
           title: 'Impact',
-          tabBarLabel: Platform.OS === 'web' ? () => null : 'Impact',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="chart.line.uptrend.xyaxis" color={color} />,
         }}
       />
