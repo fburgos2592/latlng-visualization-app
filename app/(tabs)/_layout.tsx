@@ -37,6 +37,7 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
+          tabBarLabel: Platform.OS === 'web' ? () => null : 'Home',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
         }}
       />
@@ -44,6 +45,7 @@ export default function TabLayout() {
         name="explore"
         options={{
           title: 'Explore',
+          tabBarLabel: Platform.OS === 'web' ? () => null : 'Explore',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
         }}
       />
@@ -51,6 +53,7 @@ export default function TabLayout() {
         name="impact"
         options={{
           title: 'Impact',
+          tabBarLabel: Platform.OS === 'web' ? () => null : 'Impact',
           tabBarIcon: ({ color }) => <IconSymbol size={24} name="chart.line.uptrend.xyaxis" color={color} />,
         }}
       />
