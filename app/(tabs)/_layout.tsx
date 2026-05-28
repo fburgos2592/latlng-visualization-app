@@ -24,6 +24,7 @@ export default function TabLayout() {
         tabBarStyle: {
           height: baseTabBarHeight + tabBarBottomPadding,
           minHeight: baseTabBarHeight + tabBarBottomPadding,
+          bottom: Platform.OS === 'web' ? 10 : 0,
           paddingTop: Platform.OS === 'web' ? 10 : 4,
           paddingBottom: tabBarBottomPadding,
         },
