@@ -11,9 +11,9 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
-  const minBottomPadding = Platform.select({ ios: 16, android: 14, default: 18 }) ?? 16;
+  const minBottomPadding = Platform.select({ ios: 16, android: 14, web: 24, default: 18 }) ?? 16;
   const tabBarBottomPadding = Math.max(insets.bottom, minBottomPadding);
-  const baseTabBarHeight = Platform.select({ ios: 72, android: 70, default: 74 }) ?? 72;
+  const baseTabBarHeight = Platform.select({ ios: 72, android: 70, web: 92, default: 74 }) ?? 72;
 
   return (
     <Tabs
@@ -24,15 +24,15 @@ export default function TabLayout() {
         tabBarStyle: {
           height: baseTabBarHeight + tabBarBottomPadding,
           minHeight: baseTabBarHeight + tabBarBottomPadding,
-          paddingTop: 4,
+          paddingTop: Platform.OS === 'web' ? 10 : 4,
           paddingBottom: tabBarBottomPadding,
         },
         tabBarItemStyle: {
           paddingVertical: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          lineHeight: 12,
+          fontSize: Platform.OS === 'web' ? 11 : 12,
+          lineHeight: Platform.OS === 'web' ? 11 : 12,
         },
       }}>
       <Tabs.Screen
