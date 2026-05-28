@@ -21,21 +21,16 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
-        tabBarLabelPosition: Platform.OS === 'web' ? 'beside-icon' : 'below-icon',
+        tabBarShowLabel: Platform.OS !== 'web',
         tabBarStyle: {
-          height: Platform.OS === 'web' ? 76 : baseTabBarHeight + tabBarBottomPadding,
-          minHeight: Platform.OS === 'web' ? 76 : baseTabBarHeight + tabBarBottomPadding,
+          height: Platform.OS === 'web' ? 72 : baseTabBarHeight + tabBarBottomPadding,
+          minHeight: Platform.OS === 'web' ? 72 : baseTabBarHeight + tabBarBottomPadding,
           bottom: Platform.OS === 'web' ? 12 : 0,
-          paddingTop: Platform.OS === 'web' ? 8 : 4,
+          paddingTop: Platform.OS === 'web' ? 6 : 4,
           paddingBottom: tabBarBottomPadding,
         },
         tabBarItemStyle: {
-          paddingTop: Platform.OS === 'web' ? 4 : 0,
-          paddingBottom: Platform.OS === 'web' ? 4 : 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: Platform.OS === 'web' ? 12 : 12,
-          lineHeight: Platform.OS === 'web' ? 14 : 12,
+          paddingVertical: Platform.OS === 'web' ? 2 : 0,
         },
       }}>
       <Tabs.Screen
