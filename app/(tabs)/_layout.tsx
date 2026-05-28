@@ -11,9 +11,9 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
-  const minBottomPadding = Platform.select({ ios: 10, android: 8, default: 12 }) ?? 10;
+  const minBottomPadding = Platform.select({ ios: 12, android: 10, default: 16 }) ?? 12;
   const tabBarBottomPadding = Math.max(insets.bottom, minBottomPadding);
-  const baseTabBarHeight = Platform.select({ ios: 62, android: 60, default: 64 }) ?? 62;
+  const baseTabBarHeight = Platform.select({ ios: 66, android: 64, default: 70 }) ?? 66;
 
   return (
     <Tabs
@@ -23,36 +23,42 @@ export default function TabLayout() {
         tabBarButton: HapticTab,
         tabBarStyle: {
           height: baseTabBarHeight + tabBarBottomPadding,
-          paddingTop: 6,
+          minHeight: baseTabBarHeight + tabBarBottomPadding,
+          paddingTop: 8,
           paddingBottom: tabBarBottomPadding,
         },
         tabBarItemStyle: {
-          paddingVertical: 2,
+          paddingTop: 2,
+          paddingBottom: 2,
+        },
+        tabBarIconStyle: {
+          marginTop: 2,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          lineHeight: 14,
+          fontSize: 11,
+          lineHeight: 13,
+          marginBottom: 2,
         },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
         }}
       />
       <Tabs.Screen
         name="impact"
         options={{
           title: 'Impact',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="chart.line.uptrend.xyaxis" color={color} />,
+          tabBarIcon: ({ color }) => <IconSymbol size={24} name="chart.line.uptrend.xyaxis" color={color} />,
         }}
       />
     </Tabs>
