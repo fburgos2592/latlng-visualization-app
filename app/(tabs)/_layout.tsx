@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HapticTab } from '@/components/haptic-tab';
@@ -38,21 +39,36 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="house.fill" color={color} />,
+          tabBarIcon: ({ color }) =>
+            Platform.OS === 'web' ? (
+              <MaterialIcons color={color} size={24} name="home" />
+            ) : (
+              <IconSymbol size={24} name="house.fill" color={color} />
+            ),
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
           title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="paperplane.fill" color={color} />,
+          tabBarIcon: ({ color }) =>
+            Platform.OS === 'web' ? (
+              <MaterialIcons color={color} size={24} name="send" />
+            ) : (
+              <IconSymbol size={24} name="paperplane.fill" color={color} />
+            ),
         }}
       />
       <Tabs.Screen
         name="impact"
         options={{
           title: 'Impact',
-          tabBarIcon: ({ color }) => <IconSymbol size={24} name="chart.line.uptrend.xyaxis" color={color} />,
+          tabBarIcon: ({ color }) =>
+            Platform.OS === 'web' ? (
+              <MaterialIcons color={color} size={24} name="insights" />
+            ) : (
+              <IconSymbol size={24} name="chart.line.uptrend.xyaxis" color={color} />
+            ),
         }}
       />
     </Tabs>
