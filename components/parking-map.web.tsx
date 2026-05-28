@@ -157,7 +157,7 @@ function clampPositiveNumber(value: number, fallback: number): number {
   return value;
 }
 
-export default function ParkingMap({ hotspots, routeGroups, tomtomApiKey, truckProfile }: ParkingMapProps) {
+export default function ParkingMap({ hotspots, routeGroups, truckProfile }: ParkingMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
