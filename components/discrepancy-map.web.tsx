@@ -77,6 +77,27 @@ function formatEasternDateTime(ms: number): string {
   }).format(new Date(ms));
 }
 
+function formatTimeLabel(value: string | null, fallbackMs: number | null): string {
+  if (value && value.trim()) {
+    return value.trim();
+  }
+
+  if (fallbackMs != null) {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(new Date(fallbackMs));
+  }
+
+  return 'N/A';
+}
+
 export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
@@ -133,8 +154,8 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         const arrived: [number, number] = [point.arrivedLat, point.arrivedLng];
         const color = colorForMiles(point.distanceMiles);
         const customerLabel = point.customerName ?? 'Unknown customer';
-        const invoiceTimeLabel = point.invoiceTimeMs != null ? formatEasternDateTime(point.invoiceTimeMs) : point.invoiceTimeLabel ?? 'N/A';
-        const arrivedTimeLabel = point.arrivedTimeMs != null ? formatEasternDateTime(point.arrivedTimeMs) : point.arrivedTimeLabel ?? 'N/A';
+        const invoiceTimeLabel = formatTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs);
+        const arrivedTimeLabel = formatTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs);
         const timeDeltaLabel = point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A';
         const isSelected = selectedPointId === point.id;
         const lineColor = isSelected ? '#2563eb' : color;

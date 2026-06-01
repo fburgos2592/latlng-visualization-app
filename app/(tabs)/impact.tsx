@@ -284,16 +284,20 @@ function formatEasternDateTime(ms: number): string {
 
 function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
   if (value && value.trim()) {
-    const parsedMs = parseTimeValue(value);
-    if (parsedMs != null) {
-      return formatEasternDateTime(parsedMs);
-    }
-
     return value.trim();
   }
 
   if (fallbackMs != null) {
-    return formatEasternDateTime(fallbackMs);
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'UTC',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+    }).format(new Date(fallbackMs));
   }
 
   return 'N/A';
@@ -1195,23 +1199,30 @@ export default function ImpactScreen() {
             {selectedStop ? (
               <View style={[styles.selectedStopDrawer, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}> 
                 <View style={styles.selectedStopHeader}>
-                  <View>
-                    <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected stop</Text>
-                    <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
-                      {selectedStop.customerName ?? 'Unknown customer'} | Invoice {selectedStop.invoiceId}
-                    </Text>
+                  <View style={styles.selectedStopHeaderLeft}>
+                    <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>{selectedStop.customerName ?? 'Unknown customer'}</Text>
+                    <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>Invoice {selectedStop.invoiceId} | WH {selectedStop.whId} | {selectedStop.offender}</Text>
                   </View>
-                  <Text style={[styles.drawerScore, { color: theme.bodyText }]}>Map sync active</Text>
+                  <View style={styles.selectedStopHeaderRight}>
+                    <Text style={[styles.drawerScore, { color: theme.bodyText }]}>{selectedStop.distanceMiles.toFixed(2)} mi</Text>
+                    <Text style={[styles.drawerScoreSub, { color: theme.mutedText }]}>{selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
+                  </View>
+                </View>
+                <View style={styles.selectedStopTimestampRow}>
+                  <View style={styles.selectedStopTimestampBlock}>
+                    <Text style={[styles.drawerTimestampLabel, { color: theme.mutedText }]}>Invoice timestamp (ET)</Text>
+                    <Text style={[styles.drawerTimestampValue, { color: theme.bodyText }]}>{formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
+                  </View>
+                  <View style={styles.selectedStopTimestampBlock}>
+                    <Text style={[styles.drawerTimestampLabel, { color: theme.mutedText }]}>Arrived timestamp (ET)</Text>
+                    <Text style={[styles.drawerTimestampValue, { color: theme.bodyText }]}>{formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
+                  </View>
                 </View>
                 <View style={styles.selectedStopGrid}>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>WH: {selectedStop.whId}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Route: {selectedStop.offender}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice timestamp (ET): {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived timestamp (ET): {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
                 </View>
               </View>
             ) : null}
@@ -1782,10 +1793,47 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
+  selectedStopHeaderLeft: {
+    flex: 1,
+    gap: 4,
+  },
+  selectedStopHeaderRight: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
   drawerScore: {
-    fontSize: 12,
+    fontSize: 16,
     fontWeight: '900',
+  },
+  drawerScoreSub: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  selectedStopTimestampRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  selectedStopTimestampBlock: {
+    flexGrow: 1,
+    minWidth: 220,
+    gap: 2,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#ffffff80',
+    borderWidth: 1,
+    borderColor: '#dbe3ef',
+  },
+  drawerTimestampLabel: {
+    fontSize: 11,
+    fontWeight: '800',
     textTransform: 'uppercase',
+  },
+  drawerTimestampValue: {
+    fontSize: 13,
+    fontWeight: '800',
   },
   selectedStopGrid: {
     flexDirection: 'row',
