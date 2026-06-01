@@ -269,6 +269,31 @@ function formatRouteDate(value: string | null): string | null {
   return parsed.toISOString().slice(0, 10);
 }
 
+function pickRouteDate(points: Array<{ dateLabel: string | null }>): string | null {
+  const counts = new Map<string, number>();
+
+  for (const point of points) {
+    const normalizedDate = formatRouteDate(point.dateLabel);
+    if (!normalizedDate) {
+      continue;
+    }
+
+    counts.set(normalizedDate, (counts.get(normalizedDate) ?? 0) + 1);
+  }
+
+  if (counts.size === 0) {
+    return null;
+  }
+
+  return Array.from(counts.entries()).sort((left, right) => {
+    if (right[1] !== left[1]) {
+      return right[1] - left[1];
+    }
+
+    return left[0].localeCompare(right[0]);
+  })[0][0];
+}
+
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
@@ -535,7 +560,7 @@ export default function ImpactScreen() {
       return null;
     }
 
-    const date = formatRouteDate(activeOffenderPoints[0]?.dateLabel ?? null);
+    const date = pickRouteDate(activeOffenderPoints);
     if (!date) {
       return null;
     }
