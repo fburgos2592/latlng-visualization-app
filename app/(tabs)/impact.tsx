@@ -189,6 +189,11 @@ function getField(row: DataRow, key: string | null): unknown {
   return normalizedEntries[normalizeKey(key)];
 }
 
+function getSecondColumnValue(row: DataRow): unknown {
+  const values = Object.values(row);
+  return values.length > 1 ? values[1] : null;
+}
+
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
 }
@@ -247,11 +252,7 @@ function formatSignedMinutes(value: number): string {
   return `${sign}${rounded} min`;
 }
 
-function formatRouteDate(value: string | null): string | null {
-  if (!value) {
-    return null;
-  }
-
+function parseDateToIso(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
@@ -261,12 +262,66 @@ function formatRouteDate(value: string | null): string | null {
     return trimmed;
   }
 
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return trimmed;
+  const yearFirstMatch = trimmed.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s.*)?$/);
+  if (yearFirstMatch) {
+    const year = Number(yearFirstMatch[1]);
+    const month = Number(yearFirstMatch[2]);
+    const day = Number(yearFirstMatch[3]);
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      candidate.getUTCFullYear() === year &&
+      candidate.getUTCMonth() === month - 1 &&
+      candidate.getUTCDate() === day
+    ) {
+      return candidate.toISOString().slice(0, 10);
+    }
   }
 
-  return parsed.toISOString().slice(0, 10);
+  const monthDayYearMatch = trimmed.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\s.*)?$/);
+  if (monthDayYearMatch) {
+    const first = Number(monthDayYearMatch[1]);
+    const second = Number(monthDayYearMatch[2]);
+    const year = Number(monthDayYearMatch[3]);
+    const useDayFirst = first > 12 && second <= 12;
+    const month = useDayFirst ? second : first;
+    const day = useDayFirst ? first : second;
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      candidate.getUTCFullYear() === year &&
+      candidate.getUTCMonth() === month - 1 &&
+      candidate.getUTCDate() === day
+    ) {
+      return candidate.toISOString().slice(0, 10);
+    }
+  }
+
+  const yyyymmddMatch = trimmed.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (yyyymmddMatch) {
+    const year = Number(yyyymmddMatch[1]);
+    const month = Number(yyyymmddMatch[2]);
+    const day = Number(yyyymmddMatch[3]);
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      candidate.getUTCFullYear() === year &&
+      candidate.getUTCMonth() === month - 1 &&
+      candidate.getUTCDate() === day
+    ) {
+      return candidate.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
+function formatRouteDate(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return parseDateToIso(value) ?? null;
 }
 
 function normalizeRouteDate(value: unknown): string | null {
@@ -279,6 +334,14 @@ function normalizeRouteDate(value: unknown): string | null {
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
+    const integerText = String(Math.trunc(value));
+    if (Math.abs(value - Math.trunc(value)) < 1e-9 && integerText.length === 8) {
+      const parsedInteger = parseDateToIso(integerText);
+      if (parsedInteger) {
+        return parsedInteger;
+      }
+    }
+
     if (value > 20_000) {
       return new Date((value - 25569) * 86_400_000).toISOString().slice(0, 10);
     }
@@ -291,27 +354,20 @@ function normalizeRouteDate(value: unknown): string | null {
     return null;
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return text;
-  }
-
-  if (/^\d{8}$/.test(text)) {
-    const year = Number(text.slice(0, 4));
-    const month = Number(text.slice(4, 6));
-    const day = Number(text.slice(6, 8));
-    const candidate = new Date(Date.UTC(year, month - 1, day));
-
-    if (
-      candidate.getUTCFullYear() === year &&
-      candidate.getUTCMonth() === month - 1 &&
-      candidate.getUTCDate() === day
-    ) {
-      return candidate.toISOString().slice(0, 10);
-    }
+  const parsedIso = parseDateToIso(text);
+  if (parsedIso) {
+    return parsedIso;
   }
 
   const numericText = Number(text);
   if (Number.isFinite(numericText) && /^\d+(\.\d+)?$/.test(text)) {
+    if (text.length === 8) {
+      const parsedInteger = parseDateToIso(text);
+      if (parsedInteger) {
+        return parsedInteger;
+      }
+    }
+
     if (numericText > 20_000) {
       return new Date((numericText - 25569) * 86_400_000).toISOString().slice(0, 10);
     }
@@ -375,13 +431,13 @@ async function readBinaryData(asset: DocumentPicker.DocumentPickerAsset): Promis
 }
 
 function parseCsvRows(csvText: string): DataRow[] {
-  const parsed = Papa.parse<DataRow>(csvText, {
+  const parsed = Papa.parse(csvText, {
     header: true,
     skipEmptyLines: true,
     dynamicTyping: false,
   });
 
-  const meaningfulErrors = parsed.errors.filter((entry) => entry.code !== 'UndetectableDelimiter');
+  const meaningfulErrors = parsed.errors.filter((entry: { code?: string; message?: string }) => entry.code !== 'UndetectableDelimiter');
   if (meaningfulErrors.length > 0) {
     throw new Error(meaningfulErrors[0].message || 'CSV parse error');
   }
@@ -463,8 +519,9 @@ export default function ImpactScreen() {
         const timeDeltaMinutes = invoiceTimeMs != null && arrivedTimeMs != null
           ? (arrivedTimeMs - invoiceTimeMs) / 60_000
           : null;
+        const dateBValue = getSecondColumnValue(row);
         const dateRaw = getField(row, keys.dateKey);
-        const dateLabel = normalizeRouteDate(dateRaw);
+        const dateLabel = normalizeRouteDate(dateBValue) ?? normalizeRouteDate(dateRaw);
 
         return {
           id: String(rowIndex),
@@ -626,7 +683,12 @@ export default function ImpactScreen() {
     const route = encodeURIComponent(activeOffenderSummary.offender);
     const whId = encodeURIComponent(selectedWhId === 'All' ? activeOffenderPoints[0]?.whId ?? 'Unknown WH' : selectedWhId);
 
-    return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?date=${encodeURIComponent(date)}&route=${route}&wh_id=${whId}`;
+    const params = new URLSearchParams();
+    params.set('date', date);
+    params.set('route', decodeURIComponent(route));
+    params.set('wh_id', decodeURIComponent(whId));
+
+    return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?${params.toString()}`;
   }, [activeOffenderPoints, activeOffenderSummary, selectedWhId]);
 
   async function openActiveRouteMap() {
