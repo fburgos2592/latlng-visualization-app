@@ -270,6 +270,11 @@ function formatSignedMinutes(value: number): string {
 
 function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
   if (value && value.trim()) {
+    const parsedMs = parseTimeValue(value);
+    if (parsedMs != null) {
+      return new Date(parsedMs).toLocaleString();
+    }
+
     return value.trim();
   }
 
@@ -1173,6 +1178,30 @@ export default function ImpactScreen() {
               </View>
             </View>
 
+            {selectedStop ? (
+              <View style={[styles.selectedStopDrawer, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}> 
+                <View style={styles.selectedStopHeader}>
+                  <View>
+                    <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected stop</Text>
+                    <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+                      {selectedStop.customerName ?? 'Unknown customer'} | Invoice {selectedStop.invoiceId}
+                    </Text>
+                  </View>
+                  <Text style={[styles.drawerScore, { color: theme.bodyText }]}>Map sync active</Text>
+                </View>
+                <View style={styles.selectedStopGrid}>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>WH: {selectedStop.whId}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Route: {selectedStop.offender}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice timestamp: {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived timestamp: {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
+                </View>
+              </View>
+            ) : null}
+
             <View style={[styles.stopTableHead, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
               <Text style={[styles.stopHeadCell, styles.stopCellCustomer, { color: theme.mutedText }]}>Customer / invoice</Text>
               <Text style={[styles.stopHeadCell, styles.stopCellTime, { color: theme.mutedText }]}>Times</Text>
@@ -1205,10 +1234,10 @@ export default function ImpactScreen() {
                       </View>
                       <View style={styles.stopCellTime}>
                         <Text style={[styles.stopRowMeta, { color: theme.bodyText }]} numberOfLines={1}>
-                          In {formatDateTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs)}
+                          Invoice timestamp: {formatDateTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs)}
                         </Text>
                         <Text style={[styles.stopRowMeta, { color: theme.mutedText }]} numberOfLines={1}>
-                          Arr {formatDateTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs)}
+                          Arrived timestamp: {formatDateTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs)}
                         </Text>
                       </View>
                       <View style={styles.stopCellDistance}>
@@ -1232,30 +1261,6 @@ export default function ImpactScreen() {
                 </View>
               )}
             </ScrollView>
-
-            {selectedStop ? (
-              <View style={[styles.selectedStopDrawer, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
-                <View style={styles.selectedStopHeader}>
-                  <View>
-                    <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected stop</Text>
-                    <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
-                      {selectedStop.customerName ?? 'Unknown customer'} | Invoice {selectedStop.invoiceId}
-                    </Text>
-                  </View>
-                  <Text style={[styles.drawerScore, { color: theme.bodyText }]}>Map sync active</Text>
-                </View>
-                <View style={styles.selectedStopGrid}>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>WH: {selectedStop.whId}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Route: {selectedStop.offender}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice time: {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived time: {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
-                </View>
-              </View>
-            ) : null}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>

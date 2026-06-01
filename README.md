@@ -1,6 +1,6 @@
 # LatLng Visualization App
 
-Web app for route and arrival-quality analysis, with a dedicated Impact experience for invoice vs arrived coordinate mismatches.
+Web app for route and arrival-quality analysis, with a dedicated Impact experience for invoice vs arrived coordinate mismatches, route comparison, and stop-level drilldown.
 
 ## Live Links
 
@@ -20,10 +20,23 @@ The Impact tab is designed for operational triage:
 - Upload CSV or Excel discrepancy files.
 - Auto-detect coordinate and key business columns.
 - Rank top offenders by mismatch severity.
-- Filter by warehouse (`wh_id`) and route/offender search.
-- View mismatch lines on map (invoice point to arrived point).
-- See customer name and arrived/invoice time context in highlights.
+- Filter by warehouse (`wh_id`), route/offender search, mismatch threshold, and stop search.
+- Compare a mismatch map with the actual in-route route page side by side.
+- Drill into a stop table with customer, invoice, arrival, coordinates, time delta, and a route risk score.
+- Step through stops with playback and keep the map selection synchronized with the table.
 - Page through large offender sets.
+
+The compare view uses the same shared route context everywhere:
+
+- WH
+- Date
+- Route
+- Stop count
+- Average mismatch
+- Worst mismatch
+- Average time delta
+- Over-threshold count and rate
+- Composite risk score
 
 ## Impact Input Expectations
 
@@ -44,6 +57,8 @@ Common metadata fields:
 - Customer: `customer_name`, `customer`, `account_name`, `store_name`
 - Time context: `invoice_time`, `arrived_time`, `arrival_time`, `arrived_at`
 
+For route-linking, the app also prefers a parseable date field, and it can fall back to a second-column date value when present.
+
 ## Architecture
 
 Frontend:
@@ -57,6 +72,11 @@ Backend proxy:
 - Node + Express service in `server/`
 - Endpoint: `GET /route`
 - Proxies TomTom route requests using server-side `TOMTOM_API_KEY`
+
+External route compare:
+
+- The in-route panel loads the DriverCloud route page in an iframe.
+- The external page is cross-origin, so the app treats it as opaque and syncs only through the URL, shared summary, and local stop selection.
 
 ## Security
 
@@ -104,6 +124,12 @@ npm run deploy
 
 `deploy` runs `expo export -p web` and publishes `dist` to `gh-pages`.
 
+Current live workflow:
+
+- Push changes to `main`.
+- Run `npm run deploy`.
+- Hard refresh GitHub Pages if the latest build is not visible immediately.
+
 ## Tech Stack
 
 - Expo Router
@@ -114,14 +140,20 @@ npm run deploy
 - Express + CORS + dotenv
 - TomTom Routing API (via proxy)
 
+Optional future data source:
+
+- Samsara API can be layered in on the server side for actual route traces, stop times, dwell, and route execution telemetry.
+
 ## Notes
 
 - On GitHub Pages, browser cache can delay visual updates. Hard refresh after deploy if changes do not appear immediately.
 - Large files are supported, but keeping only required columns improves parsing speed.
+- The compare view is best used with route/date/warehouse fields populated so the in-route URL can resolve correctly.
 
 ## Recent Web Updates
 
 - Bottom tab navigation was tuned for Windows/Edge viewport behavior.
 - Home, Explore, and Impact labels are restored and visible on web.
 - Web tab icons use explicit Material icon names for reliable rendering.
+- Impact now includes split-view route comparison, a shared summary bar, stop search, playback, and a selected-stop detail drawer.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.

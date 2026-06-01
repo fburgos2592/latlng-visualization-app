@@ -104,7 +104,13 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         return;
       }
 
-      const bounds = L.latLngBounds([]);
+      const overviewBounds = L.latLngBounds([]);
+      let selectedBounds: any = null;
+      const selectedPoint = selectedPointId ? points.find((point) => point.id === selectedPointId) ?? null : null;
+
+      if (selectedPoint) {
+        selectedBounds = L.latLngBounds([]);
+      }
 
       for (const point of points) {
         const invoice: [number, number] = [point.invoiceLat, point.invoiceLng];
@@ -154,11 +160,25 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
           .bindTooltip(`Arrived: ${customerLabel}`, { permanent: false })
           .addTo(layerRef.current);
 
-        bounds.extend(invoice);
-        bounds.extend(arrived);
+        overviewBounds.extend(invoice);
+        overviewBounds.extend(arrived);
+
+        if (selectedBounds && point.id === selectedPointId) {
+          selectedBounds.extend(invoice);
+          selectedBounds.extend(arrived);
+        }
       }
 
-      mapRef.current.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+      if (selectedBounds && selectedPoint) {
+        mapRef.current.flyToBounds(selectedBounds, {
+          padding: [80, 80],
+          maxZoom: 15,
+          duration: 0.7,
+        });
+      } else {
+        mapRef.current.fitBounds(overviewBounds, { padding: [30, 30], maxZoom: 13 });
+      }
+
       mapRef.current.invalidateSize();
     }
 
