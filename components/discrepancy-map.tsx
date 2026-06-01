@@ -8,7 +8,12 @@ type DiscrepancyPoint = {
   arrivedLng: number;
   distanceMiles: number;
   offender: string;
+  whId: string;
   invoiceId: string;
+  customerName: string | null;
+  invoiceTimeLabel: string | null;
+  arrivedTimeLabel: string | null;
+  timeDeltaMinutes: number | null;
 };
 
 type DiscrepancyMapProps = {
