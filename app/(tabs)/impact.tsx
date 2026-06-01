@@ -1206,12 +1206,12 @@ export default function ImpactScreen() {
                 <View style={styles.selectedStopGrid}>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>WH: {selectedStop.whId}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Route: {selectedStop.offender}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice timestamp: {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived timestamp: {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice timestamp (ET): {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived timestamp (ET): {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
                 </View>
               </View>
             ) : null}
