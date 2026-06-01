@@ -152,20 +152,28 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: 
 
   return (
     <View style={styles.shell}>
-      <View style={styles.mapStack}>
-        <View ref={containerRef} style={styles.map} />
+      <View style={styles.compareGrid}>
+        <View style={styles.comparePane}>
+          <View style={styles.paneHeader}>
+            <Text style={styles.paneTitle}>Mismatch map</Text>
+            <Text style={styles.paneSub}>Invoice to arrived lines</Text>
+          </View>
+          <View ref={containerRef} style={styles.map} />
+        </View>
         {routeMapUrl ? (
-          <View style={styles.routeOverlayShell}>
-            <View style={styles.routeOverlayHeader}>
-              <Text style={styles.routeOverlayTitle}>In-route map overlay</Text>
-              <Text style={styles.routeOverlaySub}>WH + date + route</Text>
+          <View style={styles.comparePane}>
+            <View style={styles.paneHeader}>
+              <Text style={styles.paneTitle}>In-route map</Text>
+              <Text style={styles.paneSub}>WH + date + route</Text>
             </View>
-            <iframe
-              src={routeMapUrl}
-              title="In-route map overlay"
-              style={styles.routeOverlayFrame as any}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
+            <View style={styles.routeFrameWrap}>
+              <iframe
+                src={routeMapUrl}
+                title="In-route map compare"
+                style={styles.routeFrame as any}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              />
+            </View>
           </View>
         ) : null}
       </View>
@@ -187,54 +195,48 @@ const styles = StyleSheet.create({
     borderColor: '#cbd5e1',
     backgroundColor: '#ffffff',
   },
-  map: {
-    width: '100%',
+  compareGrid: {
+    flexDirection: 'row',
+    gap: 0,
     minHeight: 520,
   },
-  mapStack: {
-    position: 'relative',
+  comparePane: {
+    flex: 1,
+    minWidth: 0,
+    borderRightWidth: 1,
+    borderRightColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
   },
-  routeOverlayShell: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    width: '42%',
-    height: '42%',
-    minWidth: 320,
-    minHeight: 220,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(15, 23, 42, 0.22)',
-    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-    shadowColor: '#0f172a',
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    zIndex: 20,
-  },
-  routeOverlayHeader: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+  paneHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
-    backgroundColor: 'rgba(248, 250, 252, 0.95)',
+    backgroundColor: '#f8fafc',
     gap: 2,
   },
-  routeOverlayTitle: {
+  paneTitle: {
     color: '#0f172a',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
   },
-  routeOverlaySub: {
+  paneSub: {
     color: '#475569',
     fontSize: 11,
   },
-  routeOverlayFrame: {
+  map: {
+    width: '100%',
+    minHeight: 460,
+  },
+  routeFrameWrap: {
+    flex: 1,
+    minHeight: 460,
+    backgroundColor: '#f8fafc',
+  },
+  routeFrame: {
     width: '100%',
     height: '100%',
     border: 0,
-    opacity: 0.78,
   },
   legendRow: {
     borderTopWidth: 1,
