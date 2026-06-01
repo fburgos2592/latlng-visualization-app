@@ -1227,17 +1227,17 @@ export default function ImpactScreen() {
                 </View>
                 <View style={styles.selectedStopTimestampRow}>
                   <View style={styles.selectedStopTimestampBlock}>
-                    <Text style={[styles.drawerTimestampLabel, { color: theme.mutedText }]}>Invoice timestamp (ET)</Text>
-                    <Text style={[styles.drawerTimestampValue, { color: theme.bodyText }]}>{formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
-                  </View>
-                  <View style={styles.selectedStopTimestampBlock}>
                     <Text style={[styles.drawerTimestampLabel, { color: theme.mutedText }]}>Arrived timestamp (ET)</Text>
                     <Text style={[styles.drawerTimestampValue, { color: theme.bodyText }]}>{formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
+                  </View>
+                  <View style={styles.selectedStopTimestampBlock}>
+                    <Text style={[styles.drawerTimestampLabel, { color: theme.mutedText }]}>Invoice timestamp (ET)</Text>
+                    <Text style={[styles.drawerTimestampValue, { color: theme.bodyText }]}>{formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
                   </View>
                 </View>
                 <View style={styles.selectedStopGrid}>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
-                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta (arrived - invoice): {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
                   <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
                 </View>
@@ -1276,10 +1276,10 @@ export default function ImpactScreen() {
                       </View>
                       <View style={styles.stopCellTime}>
                         <Text style={[styles.stopRowMeta, { color: theme.bodyText }]} numberOfLines={1}>
-                          Invoice timestamp: {formatDateTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs)}
+                          Arrived timestamp: {formatDateTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs)}
                         </Text>
                         <Text style={[styles.stopRowMeta, { color: theme.mutedText }]} numberOfLines={1}>
-                          Arrived timestamp: {formatDateTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs)}
+                          Invoice timestamp: {formatDateTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs)}
                         </Text>
                       </View>
                       <View style={styles.stopCellDistance}>

@@ -164,7 +164,7 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         })
           .on('click', () => onPointSelect?.(point.id))
           .bindPopup(
-            `<strong>${activeOffender}</strong><br/>WH_ID: ${point.whId}<br/>Customer: ${customerLabel}<br/>Invoice: ${point.invoiceId}<br/>Distance mismatch: ${point.distanceMiles.toFixed(2)} mi<br/>Invoice time (ET): ${invoiceTimeLabel}<br/>Arrived time (ET): ${arrivedTimeLabel}<br/>Time delta: ${timeDeltaLabel}`
+            `<strong>${activeOffender}</strong><br/>WH_ID: ${point.whId}<br/>Customer: ${customerLabel}<br/>Invoice: ${point.invoiceId}<br/>Distance mismatch: ${point.distanceMiles.toFixed(2)} mi<br/>Arrived time (ET): ${arrivedTimeLabel}<br/>Invoice time (ET): ${invoiceTimeLabel}<br/>Time delta (arrived - invoice): ${timeDeltaLabel}`
           )
           .bindTooltip(`${customerLabel} (${timeDeltaLabel})`, { permanent: false })
           .addTo(layerRef.current);
