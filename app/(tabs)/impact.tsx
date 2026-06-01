@@ -269,6 +269,64 @@ function formatRouteDate(value: string | null): string | null {
   return parsed.toISOString().slice(0, 10);
 }
 
+function normalizeRouteDate(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value > 20_000) {
+      return new Date((value - 25569) * 86_400_000).toISOString().slice(0, 10);
+    }
+
+    return formatRouteDate(String(value));
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return text;
+  }
+
+  if (/^\d{8}$/.test(text)) {
+    const year = Number(text.slice(0, 4));
+    const month = Number(text.slice(4, 6));
+    const day = Number(text.slice(6, 8));
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      candidate.getUTCFullYear() === year &&
+      candidate.getUTCMonth() === month - 1 &&
+      candidate.getUTCDate() === day
+    ) {
+      return candidate.toISOString().slice(0, 10);
+    }
+  }
+
+  const numericText = Number(text);
+  if (Number.isFinite(numericText) && /^\d+(\.\d+)?$/.test(text)) {
+    if (numericText > 20_000) {
+      return new Date((numericText - 25569) * 86_400_000).toISOString().slice(0, 10);
+    }
+
+    return formatRouteDate(text);
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return null;
+}
+
 function pickRouteDate(points: Array<{ dateLabel: string | null }>): string | null {
   const counts = new Map<string, number>();
 
@@ -406,7 +464,7 @@ export default function ImpactScreen() {
           ? (arrivedTimeMs - invoiceTimeMs) / 60_000
           : null;
         const dateRaw = getField(row, keys.dateKey);
-        const dateLabel = String(dateRaw ?? '').trim() || null;
+        const dateLabel = normalizeRouteDate(dateRaw);
 
         return {
           id: String(rowIndex),
