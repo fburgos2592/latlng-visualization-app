@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
 import React, { useMemo, useState } from 'react';
-import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
@@ -245,6 +245,28 @@ function formatSignedMinutes(value: number): string {
   const rounded = Math.round(value);
   const sign = rounded > 0 ? '+' : '';
   return `${sign}${rounded} min`;
+}
+
+function formatRouteDate(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return trimmed;
+  }
+
+  return parsed.toISOString().slice(0, 10);
 }
 
 function formatPct(value: number): string {
@@ -508,6 +530,30 @@ export default function ImpactScreen() {
     };
   }, [activeOffenderPoints]);
 
+  const activeRouteMapUrl = useMemo(() => {
+    if (!activeOffenderSummary || activeOffenderPoints.length === 0) {
+      return null;
+    }
+
+    const date = formatRouteDate(activeOffenderPoints[0]?.dateLabel ?? null);
+    if (!date) {
+      return null;
+    }
+
+    const route = encodeURIComponent(activeOffenderSummary.offender);
+    const whId = encodeURIComponent(selectedWhId === 'All' ? activeOffenderPoints[0]?.whId ?? 'Unknown WH' : selectedWhId);
+
+    return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?date=${encodeURIComponent(date)}&route=${route}&wh_id=${whId}`;
+  }, [activeOffenderPoints, activeOffenderSummary, selectedWhId]);
+
+  async function openActiveRouteMap() {
+    if (!activeRouteMapUrl) {
+      return;
+    }
+
+    await Linking.openURL(activeRouteMapUrl);
+  }
+
   const globalOverThreshold = useMemo(
     () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles).length,
     [filteredPoints, thresholdMiles]
@@ -719,6 +765,13 @@ export default function ImpactScreen() {
                 Current highest offender at this threshold: {topOffender.offender}
               </Text>
             ) : null}
+            {activeRouteMapUrl ? (
+              <Pressable onPress={openActiveRouteMap} style={[styles.routeMapButton, { backgroundColor: theme.accent }]}>
+                <Text style={styles.routeMapButtonText}>Open In-Route Map</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Need a parseable date to open the in-route map.</Text>
+            )}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -1027,6 +1080,18 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 12,
     lineHeight: 18,
+  },
+  routeMapButton: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  routeMapButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   rankRow: {
     borderRadius: 10,
