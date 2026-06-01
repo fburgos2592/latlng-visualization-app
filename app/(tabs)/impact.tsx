@@ -22,6 +22,8 @@ type DiscrepancyPoint = {
   customerName: string | null;
   invoiceTimeLabel: string | null;
   arrivedTimeLabel: string | null;
+  invoiceTimeDisplay: string;
+  arrivedTimeDisplay: string;
   invoiceTimeMs: number | null;
   arrivedTimeMs: number | null;
   timeDeltaMinutes: number | null;
@@ -586,6 +588,8 @@ export default function ImpactScreen() {
         const arrivedTimeLabel = String(arrivedTimeRaw ?? '').trim() || null;
         const invoiceTimeMs = parseTimeValue(invoiceTimeRaw);
         const arrivedTimeMs = parseTimeValue(arrivedTimeRaw);
+        const invoiceTimeDisplay = formatDateTimeLabel(invoiceTimeLabel, invoiceTimeMs);
+        const arrivedTimeDisplay = formatDateTimeLabel(arrivedTimeLabel, arrivedTimeMs);
         const timeDeltaMinutes = invoiceTimeMs != null && arrivedTimeMs != null
           ? (arrivedTimeMs - invoiceTimeMs) / 60_000
           : null;
@@ -607,6 +611,8 @@ export default function ImpactScreen() {
           customerName,
           invoiceTimeLabel,
           arrivedTimeLabel,
+          invoiceTimeDisplay,
+          arrivedTimeDisplay,
           invoiceTimeMs,
           arrivedTimeMs,
           timeDeltaMinutes,

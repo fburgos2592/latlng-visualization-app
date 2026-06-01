@@ -14,6 +14,8 @@ type DiscrepancyPoint = {
   customerName: string | null;
   invoiceTimeLabel: string | null;
   arrivedTimeLabel: string | null;
+  invoiceTimeDisplay: string;
+  arrivedTimeDisplay: string;
   invoiceTimeMs: number | null;
   arrivedTimeMs: number | null;
   timeDeltaMinutes: number | null;
@@ -90,22 +92,6 @@ function formatWallClockFromSerial(ms: number): string {
   }).format(new Date(ms));
 }
 
-function formatTimeLabel(value: string | null, fallbackMs: number | null): string {
-  if (value && value.trim()) {
-    if (/^\d+(?:\.\d+)?$/.test(value.trim())) {
-      return formatWallClockFromSerial(Number(value));
-    }
-
-    return value.trim();
-  }
-
-  if (fallbackMs != null) {
-    return formatWallClockFromSerial(fallbackMs);
-  }
-
-  return 'N/A';
-}
-
 export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
@@ -162,8 +148,8 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         const arrived: [number, number] = [point.arrivedLat, point.arrivedLng];
         const color = colorForMiles(point.distanceMiles);
         const customerLabel = point.customerName ?? 'Unknown customer';
-        const invoiceTimeLabel = formatTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs);
-        const arrivedTimeLabel = formatTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs);
+        const invoiceTimeLabel = point.invoiceTimeDisplay;
+        const arrivedTimeLabel = point.arrivedTimeDisplay;
         const timeDeltaLabel = point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A';
         const isSelected = selectedPointId === point.id;
         const lineColor = isSelected ? '#2563eb' : color;
