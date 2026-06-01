@@ -282,22 +282,33 @@ function formatEasternDateTime(ms: number): string {
   }).format(new Date(ms));
 }
 
+function formatWallClockFromSerial(ms: number): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  }).format(new Date(ms));
+}
+
 function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
   if (value && value.trim()) {
+    if (/^\d+(?:\.\d+)?$/.test(value.trim())) {
+      const parsedMs = parseTimeValue(value);
+      if (parsedMs != null) {
+        return formatWallClockFromSerial(parsedMs);
+      }
+    }
+
     return value.trim();
   }
 
   if (fallbackMs != null) {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'UTC',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    }).format(new Date(fallbackMs));
+    return formatWallClockFromSerial(fallbackMs);
   }
 
   return 'N/A';
