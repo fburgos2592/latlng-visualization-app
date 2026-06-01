@@ -24,6 +24,8 @@ The Impact tab is designed for operational triage:
 - Compare a mismatch map with the actual in-route route page side by side.
 - Drill into a stop table with customer, invoice, arrival, coordinates, time delta, and a route risk score.
 - Step through stops with playback and keep the map selection synchronized with the table.
+- Show timeline fields in ops-first order: arrived first, invoice second.
+- Keep map popup timestamps aligned with the same display values used in the table and detail drawer.
 - Page through large offender sets.
 
 The compare view uses the same shared route context everywhere:
@@ -56,6 +58,12 @@ Common metadata fields:
 - Invoice ID: `invoice`, `invoice_id`, `order_id`
 - Customer: `customer_name`, `customer`, `account_name`, `store_name`
 - Time context: `invoice_time`, `arrived_time`, `arrival_time`, `arrived_at`
+
+Time rendering notes:
+
+- Spreadsheet numeric serial values are converted to readable wall-clock timestamps in the UI.
+- If source files already contain readable time strings, the app preserves those values for display.
+- Time delta is displayed as `arrived - invoice`.
 
 For route-linking, the app also prefers a parseable date field, and it can fall back to a second-column date value when present.
 
@@ -156,4 +164,6 @@ Optional future data source:
 - Home, Explore, and Impact labels are restored and visible on web.
 - Web tab icons use explicit Material icon names for reliable rendering.
 - Impact now includes split-view route comparison, a shared summary bar, stop search, playback, and a selected-stop detail drawer.
+- Impact timeline presentation now shows arrived before invoice in the drawer, stop table, and map popup.
+- Timestamp display was hardened so map and table use the same formatted values.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.
