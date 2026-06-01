@@ -268,18 +268,32 @@ function formatSignedMinutes(value: number): string {
   return `${sign}${rounded} min`;
 }
 
+function formatEasternDateTime(ms: number): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).format(new Date(ms));
+}
+
 function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
   if (value && value.trim()) {
     const parsedMs = parseTimeValue(value);
     if (parsedMs != null) {
-      return new Date(parsedMs).toLocaleString();
+      return formatEasternDateTime(parsedMs);
     }
 
     return value.trim();
   }
 
   if (fallbackMs != null) {
-    return new Date(fallbackMs).toLocaleString();
+    return formatEasternDateTime(fallbackMs);
   }
 
   return 'N/A';
