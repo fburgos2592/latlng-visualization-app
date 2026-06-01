@@ -20,6 +20,7 @@ type DiscrepancyPoint = {
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
+  routeMapUrl?: string | null;
 };
 
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
@@ -46,7 +47,7 @@ function formatSignedMinutes(value: number): string {
   return `${sign}${rounded} min`;
 }
 
-export default function DiscrepancyMap({ points, activeOffender }: DiscrepancyMapProps) {
+export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -151,7 +152,23 @@ export default function DiscrepancyMap({ points, activeOffender }: DiscrepancyMa
 
   return (
     <View style={styles.shell}>
-      <View ref={containerRef} style={styles.map} />
+      <View style={styles.mapStack}>
+        <View ref={containerRef} style={styles.map} />
+        {routeMapUrl ? (
+          <View style={styles.routeOverlayShell}>
+            <View style={styles.routeOverlayHeader}>
+              <Text style={styles.routeOverlayTitle}>In-route map overlay</Text>
+              <Text style={styles.routeOverlaySub}>WH + date + route</Text>
+            </View>
+            <iframe
+              src={routeMapUrl}
+              title="In-route map overlay"
+              style={styles.routeOverlayFrame as any}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          </View>
+        ) : null}
+      </View>
       <View style={styles.legendRow}>
         <Text style={styles.legendTitle}>Legend:</Text>
         <Text style={styles.legendItem}>Blue dot invoice</Text>
@@ -173,6 +190,51 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     minHeight: 520,
+  },
+  mapStack: {
+    position: 'relative',
+  },
+  routeOverlayShell: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: '42%',
+    height: '42%',
+    minWidth: 320,
+    minHeight: 220,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(15, 23, 42, 0.22)',
+    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    zIndex: 20,
+  },
+  routeOverlayHeader: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: 'rgba(248, 250, 252, 0.95)',
+    gap: 2,
+  },
+  routeOverlayTitle: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  routeOverlaySub: {
+    color: '#475569',
+    fontSize: 11,
+  },
+  routeOverlayFrame: {
+    width: '100%',
+    height: '100%',
+    border: 0,
+    opacity: 0.78,
   },
   legendRow: {
     borderTopWidth: 1,

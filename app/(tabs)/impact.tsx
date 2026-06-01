@@ -924,7 +924,11 @@ export default function ImpactScreen() {
             <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
               Dashed connectors show invoice location to arrived location per invoice. More red means larger discrepancy.
             </Text>
-            <DiscrepancyMap points={activeOffenderPoints} activeOffender={activeOffenderSummary.offender} />
+            <DiscrepancyMap
+              points={activeOffenderPoints}
+              activeOffender={activeOffenderSummary.offender}
+              routeMapUrl={activeRouteMapUrl}
+            />
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>

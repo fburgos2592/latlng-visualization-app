@@ -19,6 +19,7 @@ type DiscrepancyPoint = {
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
+  routeMapUrl?: string | null;
 };
 
 export default function DiscrepancyMap({ points, activeOffender }: DiscrepancyMapProps) {
