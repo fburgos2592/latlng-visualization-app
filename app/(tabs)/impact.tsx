@@ -1,6 +1,6 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
@@ -10,6 +10,7 @@ type DataRow = Record<string, unknown>;
 
 type DiscrepancyPoint = {
   id: string;
+  rowIndex: number;
   invoiceLat: number;
   invoiceLng: number;
   arrivedLat: number;
@@ -21,8 +22,23 @@ type DiscrepancyPoint = {
   customerName: string | null;
   invoiceTimeLabel: string | null;
   arrivedTimeLabel: string | null;
+  invoiceTimeMs: number | null;
+  arrivedTimeMs: number | null;
   timeDeltaMinutes: number | null;
   dateLabel: string | null;
+};
+
+type CompareSummary = {
+  date: string | null;
+  route: string;
+  whId: string;
+  stopCount: number;
+  averageMiles: number;
+  maxMiles: number;
+  averageTimeDeltaMinutes: number | null;
+  overThresholdCount: number;
+  overThresholdRate: number;
+  riskScore: number;
 };
 
 type KeySelection = {
@@ -252,6 +268,18 @@ function formatSignedMinutes(value: number): string {
   return `${sign}${rounded} min`;
 }
 
+function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
+  if (value && value.trim()) {
+    return value.trim();
+  }
+
+  if (fallbackMs != null) {
+    return new Date(fallbackMs).toLocaleString();
+  }
+
+  return 'N/A';
+}
+
 function parseDateToIso(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -408,6 +436,10 @@ function pickRouteDate(points: Array<{ dateLabel: string | null }>): string | nu
   })[0][0];
 }
 
+function pointSelectionKey(point: DiscrepancyPoint): string {
+  return `${point.offender}::${point.id}`;
+}
+
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
@@ -475,10 +507,14 @@ export default function ImpactScreen() {
   const [error, setError] = useState('');
   const [thresholdText, setThresholdText] = useState('1');
   const [selectedOffender, setSelectedOffender] = useState<string | null>(null);
+  const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [offenderPage, setOffenderPage] = useState(1);
   const [selectedWhId, setSelectedWhId] = useState('All');
   const [isWhDropdownOpen, setIsWhDropdownOpen] = useState(false);
   const [routeSearchQuery, setRouteSearchQuery] = useState('');
+  const [stopSearchQuery, setStopSearchQuery] = useState('');
+  const [stopThresholdOnly, setStopThresholdOnly] = useState(false);
+  const [isPlaybackActive, setIsPlaybackActive] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
 
@@ -525,6 +561,7 @@ export default function ImpactScreen() {
 
         return {
           id: String(rowIndex),
+          rowIndex,
           invoiceLat,
           invoiceLng,
           arrivedLat,
@@ -536,6 +573,8 @@ export default function ImpactScreen() {
           customerName,
           invoiceTimeLabel,
           arrivedTimeLabel,
+          invoiceTimeMs,
+          arrivedTimeMs,
           timeDeltaMinutes,
           dateLabel,
         } satisfies DiscrepancyPoint;
@@ -649,7 +688,99 @@ export default function ImpactScreen() {
       .slice(0, 120);
   }, [activeOffenderSummary, filteredPoints]);
 
-  const highlightedPoints = useMemo(() => activeOffenderPoints.slice(0, 5), [activeOffenderPoints]);
+  const stopTablePoints = useMemo(() => {
+    const normalizedQuery = stopSearchQuery.trim().toLowerCase();
+
+    return activeOffenderPoints
+      .filter((point) => {
+        if (stopThresholdOnly && point.distanceMiles < thresholdMiles) {
+          return false;
+        }
+
+        if (!normalizedQuery) {
+          return true;
+        }
+
+        const haystack = [
+          point.customerName ?? '',
+          point.invoiceId,
+          point.whId,
+          point.offender,
+          point.dateLabel ?? '',
+          point.invoiceTimeLabel ?? '',
+          point.arrivedTimeLabel ?? '',
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        return haystack.includes(normalizedQuery);
+      })
+      .sort((left, right) => {
+        const leftTime = left.invoiceTimeMs ?? left.arrivedTimeMs ?? Number.MAX_SAFE_INTEGER;
+        const rightTime = right.invoiceTimeMs ?? right.arrivedTimeMs ?? Number.MAX_SAFE_INTEGER;
+
+        if (leftTime !== rightTime) {
+          return leftTime - rightTime;
+        }
+
+        if (right.distanceMiles !== left.distanceMiles) {
+          return right.distanceMiles - left.distanceMiles;
+        }
+
+        return left.rowIndex - right.rowIndex;
+      });
+  }, [activeOffenderPoints, stopSearchQuery, stopThresholdOnly, thresholdMiles]);
+
+  const selectedStop = useMemo(() => {
+    if (!stopTablePoints.length) {
+      return null;
+    }
+
+    if (!selectedStopId) {
+      return stopTablePoints[0];
+    }
+
+    return stopTablePoints.find((point) => pointSelectionKey(point) === selectedStopId) ?? stopTablePoints[0];
+  }, [selectedStopId, stopTablePoints]);
+
+  const visibleStopIndex = useMemo(() => {
+    if (!selectedStop) {
+      return -1;
+    }
+
+    return stopTablePoints.findIndex((point) => pointSelectionKey(point) === pointSelectionKey(selectedStop));
+  }, [selectedStop, stopTablePoints]);
+
+  useEffect(() => {
+    if (stopTablePoints.length === 0) {
+      setSelectedStopId(null);
+      setIsPlaybackActive(false);
+      return;
+    }
+
+    const currentKey = selectedStopId;
+    const stillVisible = currentKey ? stopTablePoints.some((point) => pointSelectionKey(point) === currentKey) : false;
+
+    if (!stillVisible) {
+      setSelectedStopId(pointSelectionKey(stopTablePoints[0]));
+    }
+  }, [selectedStopId, stopTablePoints]);
+
+  useEffect(() => {
+    if (!isPlaybackActive || stopTablePoints.length <= 1) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setSelectedStopId((current) => {
+        const index = current ? stopTablePoints.findIndex((point) => pointSelectionKey(point) === current) : -1;
+        const nextIndex = index >= 0 ? (index + 1) % stopTablePoints.length : 0;
+        return pointSelectionKey(stopTablePoints[nextIndex]);
+      });
+    }, 1400);
+
+    return () => clearInterval(timer);
+  }, [isPlaybackActive, stopTablePoints]);
 
   const activeTimeSummary = useMemo(() => {
     const pointsWithTimes = activeOffenderPoints.filter((point) => point.timeDeltaMinutes != null);
@@ -670,26 +801,48 @@ export default function ImpactScreen() {
     };
   }, [activeOffenderPoints]);
 
-  const activeRouteMapUrl = useMemo(() => {
+  const activeRouteDate = useMemo(() => pickRouteDate(activeOffenderPoints), [activeOffenderPoints]);
+
+  const compareSummary = useMemo<CompareSummary | null>(() => {
     if (!activeOffenderSummary || activeOffenderPoints.length === 0) {
       return null;
     }
 
-    const date = pickRouteDate(activeOffenderPoints);
+    const routeWhId = selectedWhId === 'All' ? activeOffenderPoints[0]?.whId ?? 'Unknown WH' : selectedWhId;
+
+    return {
+      date: activeRouteDate,
+      route: activeOffenderSummary.offender,
+      whId: routeWhId,
+      stopCount: activeOffenderPoints.length,
+      averageMiles: activeOffenderSummary.averageMiles,
+      maxMiles: activeOffenderSummary.maxMiles,
+      averageTimeDeltaMinutes: activeTimeSummary?.averageMinutes ?? null,
+      overThresholdCount: activeOffenderSummary.overThresholdCount,
+      overThresholdRate: activeOffenderSummary.overThresholdRate,
+      riskScore:
+        (activeOffenderSummary.averageMiles * 15) +
+        (activeOffenderSummary.maxMiles * 6) +
+        (activeOffenderSummary.overThresholdRate * 100) +
+        ((activeTimeSummary?.maxAbsDelta ?? 0) / 2),
+    };
+  }, [activeOffenderPoints, activeOffenderSummary, activeRouteDate, activeTimeSummary, selectedWhId]);
+
+  const activeRouteMapUrl = useMemo(() => {
+    if (!compareSummary || activeOffenderPoints.length === 0) {
+      return null;
+    }
+
+    const date = compareSummary.date;
     if (!date) {
       return null;
     }
 
-    const route = encodeURIComponent(activeOffenderSummary.offender);
-    const whId = encodeURIComponent(selectedWhId === 'All' ? activeOffenderPoints[0]?.whId ?? 'Unknown WH' : selectedWhId);
+    const route = encodeURIComponent(compareSummary.route);
+    const whId = encodeURIComponent(compareSummary.whId);
 
-    const params = new URLSearchParams();
-    params.set('date', date);
-    params.set('route', decodeURIComponent(route));
-    params.set('wh_id', decodeURIComponent(whId));
-
-    return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?${params.toString()}`;
-  }, [activeOffenderPoints, activeOffenderSummary, selectedWhId]);
+    return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?date=${encodeURIComponent(date)}&route=${route}&wh_id=${whId}`;
+  }, [activeOffenderPoints.length, compareSummary]);
 
   async function openActiveRouteMap() {
     if (!activeRouteMapUrl) {
@@ -928,25 +1081,181 @@ export default function ImpactScreen() {
               points={activeOffenderPoints}
               activeOffender={activeOffenderSummary.offender}
               routeMapUrl={activeRouteMapUrl}
+              compareSummary={compareSummary}
+              selectedPointId={selectedStop ? pointSelectionKey(selectedStop) : null}
+              onPointSelect={(pointId) => setSelectedStopId(pointId)}
             />
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
-            <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Highlighted Stops With Time Context</Text>
-            <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
-              Largest distance mismatches for the selected route with customer and timing context.
-            </Text>
-            {highlightedPoints.map((point) => (
-              <View key={`highlight-${point.id}`} style={[styles.highlightRow, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
-                <Text style={[styles.highlightTitle, { color: theme.bodyText }]}>{point.customerName ?? 'Unknown customer'} | Invoice {point.invoiceId}</Text>
-                <Text style={[styles.highlightValue, { color: theme.mutedText }]}>Distance mismatch: {point.distanceMiles.toFixed(2)} mi</Text>
-                <Text style={[styles.highlightValue, { color: theme.mutedText }]}>Invoice time: {point.invoiceTimeLabel ?? 'N/A'}</Text>
-                <Text style={[styles.highlightValue, { color: theme.mutedText }]}>Arrived time: {point.arrivedTimeLabel ?? 'N/A'}</Text>
-                <Text style={[styles.highlightValue, { color: theme.mutedText }]}>
-                  Time delta (arrived - invoice): {point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A'}
-                </Text>
+            <View style={styles.sectionHeaderRow}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Stop Table + Detail Drawer</Text>
+                <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>Click a row or a map point to lock the same stop into the detail view.</Text>
               </View>
-            ))}
+              <View style={[styles.scorePill, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                <Text style={[styles.scorePillLabel, { color: theme.mutedText }]}>Route risk</Text>
+                <Text style={[styles.scorePillValue, { color: theme.bodyText }]}>{compareSummary?.riskScore.toFixed(1) ?? 'N/A'}</Text>
+              </View>
+            </View>
+
+            <View style={styles.stopToolbar}>
+              <View style={styles.stopSearchWrap}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>Search stops</Text>
+                <TextInput
+                  value={stopSearchQuery}
+                  onChangeText={setStopSearchQuery}
+                  placeholder="Customer, invoice, WH, or time"
+                  placeholderTextColor={theme.subtleText}
+                  style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+                />
+              </View>
+
+              <View style={styles.stopToggleGroup}>
+                <Pressable
+                  onPress={() => setStopThresholdOnly((value) => !value)}
+                  style={[
+                    styles.stopToggleButton,
+                    { backgroundColor: stopThresholdOnly ? theme.accent : theme.inputBg, borderColor: theme.inputBorder },
+                  ]}>
+                  <Text style={[styles.stopToggleText, { color: stopThresholdOnly ? '#ffffff' : theme.bodyText }]}>Over {thresholdMiles} mi only</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setIsPlaybackActive((value) => !value)}
+                  disabled={stopTablePoints.length <= 1}
+                  style={[
+                    styles.stopToggleButton,
+                    { backgroundColor: isPlaybackActive ? theme.accent : theme.inputBg, borderColor: theme.inputBorder },
+                    stopTablePoints.length <= 1 ? styles.stopToggleButtonDisabled : null,
+                  ]}>
+                  <Text style={[styles.stopToggleText, { color: isPlaybackActive ? '#ffffff' : theme.bodyText }]}>
+                    {isPlaybackActive ? 'Pause playback' : 'Play playback'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.stopStepper}>
+                <Pressable
+                  onPress={() => {
+                    if (!stopTablePoints.length || visibleStopIndex < 0) {
+                      return;
+                    }
+
+                    const previousIndex = visibleStopIndex <= 0 ? stopTablePoints.length - 1 : visibleStopIndex - 1;
+                    setSelectedStopId(pointSelectionKey(stopTablePoints[previousIndex]));
+                  }}
+                  disabled={stopTablePoints.length <= 1}
+                  style={[
+                    styles.stopStepButton,
+                    { backgroundColor: theme.accent },
+                    stopTablePoints.length <= 1 ? styles.stopStepButtonDisabled : null,
+                  ]}>
+                  <Text style={styles.stopStepButtonText}>Prev</Text>
+                </Pressable>
+                <Text style={[styles.stopStepperText, { color: theme.mutedText }]}>Stop {visibleStopIndex + 1} of {stopTablePoints.length || 0}</Text>
+                <Pressable
+                  onPress={() => {
+                    if (!stopTablePoints.length || visibleStopIndex < 0) {
+                      return;
+                    }
+
+                    const nextIndex = visibleStopIndex >= stopTablePoints.length - 1 ? 0 : visibleStopIndex + 1;
+                    setSelectedStopId(pointSelectionKey(stopTablePoints[nextIndex]));
+                  }}
+                  disabled={stopTablePoints.length <= 1}
+                  style={[
+                    styles.stopStepButton,
+                    { backgroundColor: theme.accent },
+                    stopTablePoints.length <= 1 ? styles.stopStepButtonDisabled : null,
+                  ]}>
+                  <Text style={styles.stopStepButtonText}>Next</Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={[styles.stopTableHead, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
+              <Text style={[styles.stopHeadCell, styles.stopCellCustomer, { color: theme.mutedText }]}>Customer / invoice</Text>
+              <Text style={[styles.stopHeadCell, styles.stopCellTime, { color: theme.mutedText }]}>Times</Text>
+              <Text style={[styles.stopHeadCell, styles.stopCellDistance, { color: theme.mutedText }]}>Mismatch</Text>
+              <Text style={[styles.stopHeadCell, styles.stopCellTime, { color: theme.mutedText }]}>WH / score</Text>
+            </View>
+
+            <ScrollView style={styles.stopTableScroll} nestedScrollEnabled>
+              {stopTablePoints.length > 0 ? (
+                stopTablePoints.map((point) => {
+                  const isSelected = selectedStop ? pointSelectionKey(point) === pointSelectionKey(selectedStop) : false;
+                  const stopScore = point.distanceMiles * 10 + Math.abs(point.timeDeltaMinutes ?? 0) * 0.5;
+
+                  return (
+                    <Pressable
+                      key={`stop-${point.id}`}
+                      onPress={() => setSelectedStopId(pointSelectionKey(point))}
+                      style={[
+                        styles.stopRow,
+                        { borderColor: theme.cardBorder, backgroundColor: isSelected ? theme.selectedRowBg : theme.cardBg },
+                        isSelected ? [styles.stopRowSelected, { borderColor: theme.selectedRowBorder }] : null,
+                      ]}>
+                      <View style={styles.stopCellCustomer}>
+                        <Text style={[styles.stopRowTitle, { color: theme.bodyText }]} numberOfLines={1}>
+                          {point.customerName ?? 'Unknown customer'}
+                        </Text>
+                        <Text style={[styles.stopRowMeta, { color: theme.mutedText }]} numberOfLines={1}>
+                          Invoice {point.invoiceId} | {point.offender}
+                        </Text>
+                      </View>
+                      <View style={styles.stopCellTime}>
+                        <Text style={[styles.stopRowMeta, { color: theme.bodyText }]} numberOfLines={1}>
+                          In {formatDateTimeLabel(point.invoiceTimeLabel, point.invoiceTimeMs)}
+                        </Text>
+                        <Text style={[styles.stopRowMeta, { color: theme.mutedText }]} numberOfLines={1}>
+                          Arr {formatDateTimeLabel(point.arrivedTimeLabel, point.arrivedTimeMs)}
+                        </Text>
+                      </View>
+                      <View style={styles.stopCellDistance}>
+                        <Text style={[styles.stopRowTitle, { color: theme.bodyText }]}>{point.distanceMiles.toFixed(2)} mi</Text>
+                        <Text style={[styles.stopRowMeta, { color: theme.mutedText }]}>
+                          {point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A'}
+                        </Text>
+                      </View>
+                      <View style={styles.stopCellTime}>
+                        <Text style={[styles.stopRowMeta, { color: theme.bodyText }]}>{point.whId}</Text>
+                        <Text style={[styles.stopRowMeta, { color: theme.mutedText }]}>
+                          Score {stopScore.toFixed(1)}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              ) : (
+                <View style={styles.stopEmptyState}>
+                  <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>No stops match the current filters.</Text>
+                </View>
+              )}
+            </ScrollView>
+
+            {selectedStop ? (
+              <View style={[styles.selectedStopDrawer, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                <View style={styles.selectedStopHeader}>
+                  <View>
+                    <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected stop</Text>
+                    <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+                      {selectedStop.customerName ?? 'Unknown customer'} | Invoice {selectedStop.invoiceId}
+                    </Text>
+                  </View>
+                  <Text style={[styles.drawerScore, { color: theme.bodyText }]}>Map sync active</Text>
+                </View>
+                <View style={styles.selectedStopGrid}>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>WH: {selectedStop.whId}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Route: {selectedStop.offender}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice time: {formatDateTimeLabel(selectedStop.invoiceTimeLabel, selectedStop.invoiceTimeMs)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived time: {formatDateTimeLabel(selectedStop.arrivedTimeLabel, selectedStop.arrivedTimeMs)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Mismatch distance: {selectedStop.distanceMiles.toFixed(2)} mi</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Time delta: {selectedStop.timeDeltaMinutes != null ? formatSignedMinutes(selectedStop.timeDeltaMinutes) : 'N/A'}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Invoice coords: {selectedStop.invoiceLat.toFixed(5)}, {selectedStop.invoiceLng.toFixed(5)}</Text>
+                  <Text style={[styles.drawerLine, { color: theme.bodyText }]}>Arrived coords: {selectedStop.arrivedLat.toFixed(5)}, {selectedStop.arrivedLng.toFixed(5)}</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -1306,6 +1615,168 @@ const styles = StyleSheet.create({
   paginationText: {
     color: '#334155',
     fontSize: 12,
+    fontWeight: '600',
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  scorePill: {
+    minWidth: 120,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  scorePillLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  scorePillValue: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  stopToolbar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  stopSearchWrap: {
+    flexGrow: 1,
+    minWidth: 240,
+    gap: 4,
+  },
+  stopToggleGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  stopToggleButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  stopToggleButtonDisabled: {
+    opacity: 0.45,
+  },
+  stopToggleText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  stopStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stopStepButton: {
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  stopStepButtonDisabled: {
+    opacity: 0.45,
+  },
+  stopStepButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  stopStepperText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  stopTableHead: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+  },
+  stopHeadCell: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  stopCellCustomer: {
+    flex: 1.4,
+    minWidth: 180,
+  },
+  stopCellTime: {
+    flex: 1.2,
+    minWidth: 150,
+  },
+  stopCellDistance: {
+    flex: 0.8,
+    minWidth: 96,
+  },
+  stopTableScroll: {
+    maxHeight: 420,
+  },
+  stopRow: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'flex-start',
+    marginTop: 10,
+  },
+  stopRowSelected: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  stopRowTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  stopRowMeta: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  stopEmptyState: {
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  selectedStopDrawer: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    gap: 10,
+  },
+  selectedStopHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  drawerScore: {
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  selectedStopGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  drawerLine: {
+    minWidth: 180,
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '600',
   },
   footerNote: {

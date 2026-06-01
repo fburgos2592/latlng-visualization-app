@@ -20,6 +20,20 @@ type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
   routeMapUrl?: string | null;
+  compareSummary?: {
+    date: string | null;
+    route: string;
+    whId: string;
+    stopCount: number;
+    averageMiles: number;
+    maxMiles: number;
+    averageTimeDeltaMinutes: number | null;
+    overThresholdCount: number;
+    overThresholdRate: number;
+    riskScore: number;
+  } | null;
+  selectedPointId?: string | null;
+  onPointSelect?: (pointId: string) => void;
 };
 
 export default function DiscrepancyMap({ points, activeOffender }: DiscrepancyMapProps) {

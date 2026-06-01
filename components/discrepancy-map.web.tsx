@@ -21,6 +21,20 @@ type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
   routeMapUrl?: string | null;
+  compareSummary?: {
+    date: string | null;
+    route: string;
+    whId: string;
+    stopCount: number;
+    averageMiles: number;
+    maxMiles: number;
+    averageTimeDeltaMinutes: number | null;
+    overThresholdCount: number;
+    overThresholdRate: number;
+    riskScore: number;
+  } | null;
+  selectedPointId?: string | null;
+  onPointSelect?: (pointId: string) => void;
 };
 
 const DEFAULT_CENTER: [number, number] = [40.83, -73.94];
@@ -47,7 +61,7 @@ function formatSignedMinutes(value: number): string {
   return `${sign}${rounded} min`;
 }
 
-export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: DiscrepancyMapProps) {
+export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -100,13 +114,18 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: 
         const invoiceTimeLabel = point.invoiceTimeLabel ?? 'N/A';
         const arrivedTimeLabel = point.arrivedTimeLabel ?? 'N/A';
         const timeDeltaLabel = point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A';
+        const isSelected = selectedPointId === point.id;
+        const lineColor = isSelected ? '#2563eb' : color;
+        const lineWeight = isSelected ? 6 : 3;
+        const lineOpacity = isSelected ? 1 : 0.85;
 
         L.polyline([invoice, arrived], {
-          color,
-          weight: 3,
-          opacity: 0.85,
+          color: lineColor,
+          weight: lineWeight,
+          opacity: lineOpacity,
           dashArray: '4 6',
         })
+          .on('click', () => onPointSelect?.(point.id))
           .bindPopup(
             `<strong>${activeOffender}</strong><br/>WH_ID: ${point.whId}<br/>Customer: ${customerLabel}<br/>Invoice: ${point.invoiceId}<br/>Distance mismatch: ${point.distanceMiles.toFixed(2)} mi<br/>Invoice time: ${invoiceTimeLabel}<br/>Arrived time: ${arrivedTimeLabel}<br/>Time delta: ${timeDeltaLabel}`
           )
@@ -114,22 +133,24 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: 
           .addTo(layerRef.current);
 
         L.circleMarker(invoice, {
-          radius: 5,
-          color: '#1d4ed8',
-          fillColor: '#60a5fa',
-          fillOpacity: 0.9,
+          radius: isSelected ? 8 : 5,
+          color: isSelected ? '#1e40af' : '#1d4ed8',
+          fillColor: isSelected ? '#93c5fd' : '#60a5fa',
+          fillOpacity: 0.95,
           weight: 2,
         })
+          .on('click', () => onPointSelect?.(point.id))
           .bindTooltip('Invoice location', { permanent: false })
           .addTo(layerRef.current);
 
         L.circleMarker(arrived, {
-          radius: 5,
-          color: '#7c2d12',
-          fillColor: '#fb923c',
-          fillOpacity: 0.95,
+          radius: isSelected ? 8 : 5,
+          color: isSelected ? '#9a3412' : '#7c2d12',
+          fillColor: isSelected ? '#fdba74' : '#fb923c',
+          fillOpacity: 0.98,
           weight: 2,
         })
+          .on('click', () => onPointSelect?.(point.id))
           .bindTooltip(`Arrived: ${customerLabel}`, { permanent: false })
           .addTo(layerRef.current);
 
@@ -148,10 +169,54 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl }: 
     return () => {
       disposed = true;
     };
-  }, [activeOffender, points]);
+  }, [activeOffender, points, selectedPointId]);
 
   return (
     <View style={styles.shell}>
+      {compareSummary ? (
+        <View style={styles.summaryBar}>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>WH</Text>
+            <Text style={styles.summaryValue}>{compareSummary.whId}</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Date</Text>
+            <Text style={styles.summaryValue}>{compareSummary.date ?? 'N/A'}</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Route</Text>
+            <Text style={styles.summaryValue}>{compareSummary.route}</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Stops</Text>
+            <Text style={styles.summaryValue}>{compareSummary.stopCount}</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Avg mismatch</Text>
+            <Text style={styles.summaryValue}>{compareSummary.averageMiles.toFixed(2)} mi</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Worst</Text>
+            <Text style={styles.summaryValue}>{compareSummary.maxMiles.toFixed(2)} mi</Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Avg time delta</Text>
+            <Text style={styles.summaryValue}>
+              {compareSummary.averageTimeDeltaMinutes != null ? `${Math.round(compareSummary.averageTimeDeltaMinutes)} min` : 'N/A'}
+            </Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Over threshold</Text>
+            <Text style={styles.summaryValue}>
+              {compareSummary.overThresholdCount} ({Math.round(compareSummary.overThresholdRate * 100)}%)
+            </Text>
+          </View>
+          <View style={styles.summaryPill}>
+            <Text style={styles.summaryLabel}>Risk score</Text>
+            <Text style={styles.summaryValue}>{compareSummary.riskScore.toFixed(1)}</Text>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.compareGrid}>
         <View style={styles.comparePane}>
           <View style={styles.paneHeader}>
@@ -199,6 +264,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 0,
     minHeight: 520,
+  },
+  summaryBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    backgroundColor: '#f8fafc',
+  },
+  summaryPill: {
+    minWidth: 110,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dbe3ef',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  summaryLabel: {
+    color: '#64748b',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  summaryValue: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '800',
   },
   comparePane: {
     flex: 1,
