@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
@@ -712,7 +712,6 @@ export default function ImpactScreen() {
   const [darkMode, setDarkMode] = useState(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
-  const logoSpinValue = useRef(new Animated.Value(0)).current;
 
   const thresholdMiles = useMemo(() => {
     const parsed = Number(thresholdText);
@@ -1350,35 +1349,6 @@ export default function ImpactScreen() {
     };
   }, [filteredPoints, thresholdMiles]);
 
-  useEffect(() => {
-    if (!isParsingFile) {
-      logoSpinValue.stopAnimation();
-      logoSpinValue.setValue(0);
-      return;
-    }
-
-    const animation = Animated.loop(
-      Animated.timing(logoSpinValue, {
-        toValue: 1,
-        duration: 1400,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-
-    animation.start();
-
-    return () => {
-      animation.stop();
-      logoSpinValue.setValue(0);
-    };
-  }, [isParsingFile, logoSpinValue]);
-
-  const logoSpin = logoSpinValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
   async function pickDataFile() {
     setError('');
     setIsParsingFile(true);
@@ -1505,22 +1475,6 @@ export default function ImpactScreen() {
           <View style={[styles.progressShell, { borderColor: theme.inputBorder, backgroundColor: theme.inputBg }]}>
             <View style={styles.progressHeaderRow}>
               <View style={styles.progressStatusWrap}>
-                <View style={[styles.logoSpinnerShell, { borderColor: theme.inputBorder, backgroundColor: theme.cardBg }]}>
-                  <Animated.View
-                    style={[
-                      styles.logoSpinnerRing,
-                      {
-                        borderTopColor: theme.accent,
-                        borderRightColor: theme.accent,
-                        transform: [{ rotate: logoSpin }],
-                      },
-                    ]}
-                  />
-                  <Image
-                    source={require('@/assets/images/baldor-logo.png')}
-                    style={styles.logoSpinnerImage}
-                  />
-                </View>
                 <Text style={[styles.progressLabel, { color: theme.bodyText }]}>{parseProgressLabel}</Text>
               </View>
               <Text style={[styles.progressPct, { color: theme.mutedText }]}>{Math.round(parseProgressPct)}%</Text>
@@ -2236,35 +2190,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   progressStatusWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
     flexShrink: 1,
-  },
-  logoSpinnerShell: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  logoSpinnerRing: {
-    position: 'absolute',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 3,
-    borderColor: 'transparent',
-    borderTopColor: '#1d4ed8',
-    borderRightColor: '#1d4ed8',
-  },
-  logoSpinnerImage: {
-    width: 26,
-    height: 15,
-    resizeMode: 'contain',
   },
   progressLabel: {
     fontSize: 12,
