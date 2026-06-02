@@ -174,7 +174,38 @@ function normalizeKey(value: string): string {
 }
 
 function toNumber(value: unknown): number | null {
-  const parsed = Number(String(value ?? '').trim());
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return null;
+  }
+
+  // Normalize locale artifacts: decimal comma, grouping separators, and unicode minus symbols.
+  let normalized = raw
+    .replace(/[\u2212\u2012\u2013\u2014\u2015]/g, '-')
+    .replace(/\s+/g, '');
+
+  const plainParsed = Number(normalized);
+  if (Number.isFinite(plainParsed)) {
+    return plainParsed;
+  }
+
+  if (/^-?\d+,\d+$/.test(normalized)) {
+    normalized = normalized.replace(',', '.');
+  } else if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(normalized)) {
+    normalized = normalized.replace(/,/g, '');
+  } else if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else if (normalized.includes(',') && normalized.includes('.')) {
+    const lastComma = normalized.lastIndexOf(',');
+    const lastDot = normalized.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  }
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -626,6 +657,7 @@ function parseCsvRows(csvText: string): DataRow[] {
     header: true,
     skipEmptyLines: true,
     dynamicTyping: false,
+    delimitersToGuess: [',', ';', '\t', '|', '^'],
   });
 
   const meaningfulErrors = parsed.errors.filter((entry: { code?: string; message?: string }) => entry.code !== 'UndetectableDelimiter');
