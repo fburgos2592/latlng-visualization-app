@@ -93,6 +93,8 @@ Backend proxy:
 - Node + Express service in `server/`
 - Endpoint: `GET /route`
 - Proxies TomTom route requests using server-side `TOMTOM_API_KEY`
+- Endpoint: `GET /samsara/*`
+- Proxies Samsara requests using server-side `SAMSARA_API_TOKEN`
 
 External route compare:
 
@@ -102,6 +104,7 @@ External route compare:
 ## Security
 
 - `TOMTOM_API_KEY` stays on the server only.
+- `SAMSARA_API_TOKEN` stays on the server only.
 - No API key is embedded in frontend assets.
 - Keep `server/.env` local/private.
 
@@ -126,7 +129,18 @@ Create `server/.env`:
 
 ```env
 TOMTOM_API_KEY=your_key_here
+SAMSARA_API_TOKEN=your_token_here
 PORT=3001
+```
+
+Samsara proxy examples:
+
+```bash
+# List vehicles
+GET http://localhost:3001/samsara/fleet/vehicles
+
+# Forward query params (example)
+GET "http://localhost:3001/samsara/fleet/vehicles/stats/history?types=gps&startTime=2026-06-01T00:00:00Z&endTime=2026-06-02T00:00:00Z"
 ```
 
 ## Build And Deploy
@@ -180,6 +194,7 @@ Optional future data source:
 - Impact timeline presentation now shows arrived before invoice in the drawer, stop table, and map popup.
 - Timestamp display was hardened so map and table use the same formatted values.
 - Impact now includes a daily summary section, a matching side follow-up drawer, and one-click Excel export.
+- Impact analysis now supports a rolling per-truck/per-route lookback window (default 48h) so recent behavior can be analyzed without a day-behind lag.
 - Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
 - Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.

@@ -62,9 +62,41 @@ type CoordinateKeys = {
   longitudeKey: string | null;
 };
 
+type SamsaraVehicleStat = {
+  id: string | number;
+  name?: string;
+  externalIds?: Record<string, string>;
+  gps?: {
+    time?: string;
+    latitude?: number;
+    longitude?: number;
+    speedMilesPerHour?: number;
+    reverseGeo?: {
+      formattedLocation?: string;
+    };
+    address?: {
+      name?: string;
+    };
+  };
+};
+
+type SamsaraVehicleStatsResponse = {
+  data?: SamsaraVehicleStat[];
+};
+
 const LATITUDE_ALIASES = ['lat', 'latitude', 'vehicle_lat', 'vehicle_latitude'];
 const LONGITUDE_ALIASES = ['lng', 'lon', 'long', 'longitude', 'vehicle_lng', 'vehicle_lon', 'vehicle_longitude'];
-const VEHICLE_ID_ALIASES = ['vehicle_id', 'truck_id', 'unit_id', 'vehicle'];
+const VEHICLE_ID_ALIASES = [
+  'vehicle_id',
+  'truck_id',
+  'unit_id',
+  'vehicle',
+  'truck',
+  'truck_name',
+  'vehicle_name',
+  'unit_name',
+  'samsara_vehicle_name',
+];
 const SPEED_ALIASES = ['speed', 'mph'];
 const START_TIME_ALIASES = ['reading_start', 'start_time', 'started_at', 'stop_start'];
 const END_TIME_ALIASES = ['reading_finish', 'end_time', 'finished_at', 'stop_end'];
@@ -79,6 +111,7 @@ const TIME_ALIASES = [
 ];
 const HOTSPOT_PRECISION = 3;
 const ROUTE_PRECISION = 4;
+const SAMSARA_PROXY_PROD_BASE = 'https://latlng-visualization-app.onrender.com/samsara';
 const DEFAULT_TRUCK_PROFILE: TruckProfile = {
   vehicleCommercial: true,
   vehicleWeightKg: 15000,
@@ -284,6 +317,14 @@ function formatCoordinate(value: number): string {
   return value.toFixed(4);
 }
 
+function resolveSamsaraProxyBase(): string {
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:3001/samsara';
+  }
+
+  return SAMSARA_PROXY_PROD_BASE;
+}
+
 async function readCsvText(asset: DocumentPicker.DocumentPickerAsset): Promise<string> {
   if ('file' in asset && asset.file) {
     return asset.file.text();
@@ -345,9 +386,16 @@ export default function HomeScreen() {
   const [rows, setRows] = useState<CsvRow[]>([]);
   const [error, setError] = useState('');
   const [fileName, setFileName] = useState('');
+  const [isSamsaraLoading, setIsSamsaraLoading] = useState(false);
+  const [lookbackHoursText, setLookbackHoursText] = useState('48');
   const [truckProfile, setTruckProfile] = useState<TruckProfile>(DEFAULT_TRUCK_PROFILE);
   const [darkMode, setDarkMode] = useState(false);
   const theme = darkMode ? dark : light;
+
+  const lookbackHours = useMemo(() => {
+    const parsed = Number(lookbackHoursText);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 48;
+  }, [lookbackHoursText]);
 
   const coordinateKeys = useMemo(() => detectCoordinateKeys(rows), [rows]);
   const vehicleIdKey = useMemo(() => detectOptionalKey(rows, VEHICLE_ID_ALIASES), [rows]);
@@ -387,7 +435,50 @@ export default function HomeScreen() {
   }, [coordinateKeys.latitudeKey, coordinateKeys.longitudeKey, endTimeKey, routeTimeKey, rows, speedKey, startTimeKey, vehicleIdKey]);
 
   const invalidRowCount = rows.length - points.length;
-  const bounds = useMemo(() => getBounds(points), [points]);
+  const analysisPoints = useMemo(() => {
+    if (points.length === 0) {
+      return points;
+    }
+
+    // Each truck keeps only its own most recent lookback window.
+    const grouped = new Map<string, Point[]>();
+    for (const point of points) {
+      const vehicleKey = point.vehicleId?.trim() || 'Unassigned';
+      const existing = grouped.get(vehicleKey) ?? [];
+      existing.push(point);
+      grouped.set(vehicleKey, existing);
+    }
+
+    const lookbackMs = lookbackHours * 60 * 60 * 1000;
+    const filtered: Point[] = [];
+
+    for (const groupPoints of grouped.values()) {
+      const latestTimestamp = groupPoints.reduce<number | null>((latest, point) => {
+        if (point.eventTimeMs == null) {
+          return latest;
+        }
+
+        if (latest == null || point.eventTimeMs > latest) {
+          return point.eventTimeMs;
+        }
+
+        return latest;
+      }, null);
+
+      if (latestTimestamp == null) {
+        filtered.push(...groupPoints);
+        continue;
+      }
+
+      const cutoff = latestTimestamp - lookbackMs;
+      filtered.push(...groupPoints.filter((point) => point.eventTimeMs != null && point.eventTimeMs >= cutoff));
+    }
+
+    return filtered;
+  }, [lookbackHours, points]);
+
+  const timeFilteredOutCount = points.length - analysisPoints.length;
+  const bounds = useMemo(() => getBounds(analysisPoints), [analysisPoints]);
   const hotspots = useMemo(() => {
     const grouped = new Map<
       string,
@@ -401,7 +492,7 @@ export default function HomeScreen() {
       }
     >();
 
-    for (const point of points) {
+    for (const point of analysisPoints) {
       const groupLat = roundCoordinate(point.latitude, HOTSPOT_PRECISION);
       const groupLng = roundCoordinate(point.longitude, HOTSPOT_PRECISION);
       const groupKey = `${groupLat}:${groupLng}`;
@@ -441,12 +532,12 @@ export default function HomeScreen() {
         averageSpeed: value.speedSamples > 0 ? value.totalSpeed / value.speedSamples : null,
       }))
       .sort((left, right) => right.count - left.count);
-  }, [points]);
+  }, [analysisPoints]);
 
   const routeGroups = useMemo(() => {
     const groupedPoints = new Map<string, Point[]>();
 
-    for (const point of points) {
+    for (const point of analysisPoints) {
       const vehicleKey = point.vehicleId?.trim() || 'Unassigned';
       const existing = groupedPoints.get(vehicleKey) ?? [];
       existing.push(point);
@@ -512,7 +603,7 @@ export default function HomeScreen() {
     }
 
     return groups.sort((left, right) => right.stops.length - left.stops.length);
-  }, [points]);
+  }, [analysisPoints]);
 
   const routedStopCount = useMemo(
     () => routeGroups.reduce((total, group) => total + group.stops.length, 0),
@@ -576,6 +667,56 @@ export default function HomeScreen() {
     }
   }
 
+  async function pullSamsaraSnapshot() {
+    setError('');
+    setIsSamsaraLoading(true);
+
+    try {
+      const proxyBase = resolveSamsaraProxyBase();
+      const response = await fetch(`${proxyBase}/fleet/vehicles/stats?types=gps`);
+
+      if (!response.ok) {
+        const responseText = await response.text();
+        throw new Error(`Samsara request failed (${response.status}). ${responseText.slice(0, 180)}`.trim());
+      }
+
+      const payload = (await response.json()) as SamsaraVehicleStatsResponse;
+      const stats = Array.isArray(payload.data) ? payload.data : [];
+
+      const snapshotRows: CsvRow[] = stats
+        .filter((entry) => entry?.gps != null)
+        .map((entry, index) => {
+          const gps = entry.gps;
+
+          return {
+            vehicle_id: String(entry.id ?? `vehicle-${index + 1}`),
+            truck_name: String(entry.name ?? '').trim() || null,
+            lat: gps?.latitude ?? null,
+            lng: gps?.longitude ?? null,
+            speed: gps?.speedMilesPerHour ?? null,
+            event_time: gps?.time ?? null,
+            location_name: gps?.address?.name ?? gps?.reverseGeo?.formattedLocation ?? null,
+            source: 'samsara_live',
+          };
+        })
+        .filter((row) => Number.isFinite(Number(row.lat)) && Number.isFinite(Number(row.lng)));
+
+      if (snapshotRows.length === 0) {
+        throw new Error('Samsara returned no vehicles with valid GPS coordinates.');
+      }
+
+      setRows(snapshotRows);
+      setFileName(`Samsara live snapshot (${snapshotRows.length} vehicles)`);
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : 'Unable to fetch Samsara vehicle snapshot.';
+      setError(message);
+      setRows([]);
+      setFileName('');
+    } finally {
+      setIsSamsaraLoading(false);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.pageBg }]}>
       <View style={styles.hero}>
@@ -604,9 +745,22 @@ export default function HomeScreen() {
           <Pressable onPress={pickCsv} style={[styles.button, { backgroundColor: theme.accent }]}>
             <Text style={styles.buttonText}>Choose CSV</Text>
           </Pressable>
+          <Pressable
+            onPress={pullSamsaraSnapshot}
+            disabled={isSamsaraLoading}
+            style={[
+              styles.button,
+              styles.buttonSecondary,
+              { borderColor: theme.inputBorder, backgroundColor: theme.inputBg },
+              isSamsaraLoading ? styles.buttonDisabled : null,
+            ]}>
+            <Text style={[styles.buttonSecondaryText, { color: theme.bodyText }]}>
+              {isSamsaraLoading ? 'Loading Samsara...' : 'Pull Samsara Snapshot'}
+            </Text>
+          </Pressable>
           <View style={[styles.metaBlock, { backgroundColor: theme.metaBg }]}>
             <Text style={[styles.metaLabel, { color: theme.accent }]}>Rows</Text>
-            <Text style={[styles.metaValue, { color: theme.bodyText }]}>{rows.length}</Text>
+            <Text style={[styles.metaValue, { color: theme.bodyText }]}>{analysisPoints.length}</Text>
           </View>
           <View style={[styles.metaBlock, { backgroundColor: theme.metaBg }]}>
             <Text style={[styles.metaLabel, { color: theme.accent }]}>Valid points</Text>
@@ -649,6 +803,42 @@ export default function HomeScreen() {
             No time column detected. Route order is currently based on uploaded row order.
           </Text>
         )}
+        <View style={styles.lookbackRow}>
+          <View style={styles.lookbackInputWrap}>
+            <Text style={[styles.inputLabel, { color: theme.muted }]}>Per-truck lookback window (hours)</Text>
+            <TextInput
+              value={lookbackHoursText}
+              onChangeText={setLookbackHoursText}
+              keyboardType="numeric"
+              style={[styles.input, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+            />
+            <View style={styles.lookbackPresetRow}>
+              {[24, 48, 72].map((hours) => {
+                const isActive = lookbackHours === hours;
+
+                return (
+                  <Pressable
+                    key={`home-lookback-${hours}`}
+                    onPress={() => setLookbackHoursText(String(hours))}
+                    style={[
+                      styles.lookbackPresetButton,
+                      {
+                        backgroundColor: isActive ? theme.accent : theme.inputBg,
+                        borderColor: isActive ? theme.accent : theme.inputBorder,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{hours}h</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <Text style={[styles.helpText, { color: theme.muted }]}>Showing the last {lookbackHours}h for each truck based on that truck's latest timestamp.</Text>
+        </View>
+        {(startTimeKey || endTimeKey || routeTimeKey) && timeFilteredOutCount > 0 ? (
+          <Text style={[styles.helpText, { color: theme.muted }]}>Filtered out {timeFilteredOutCount} older point(s) outside the per-truck {lookbackHours}h window.</Text>
+        ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
 
@@ -778,7 +968,7 @@ export default function HomeScreen() {
       <View style={[styles.card, { backgroundColor: theme.cardBg }]}>
         <Text style={[styles.sectionTitle, { color: theme.titleText }]}>Route Summary</Text>
         <View style={styles.boundsRow}>
-          <Text style={[styles.boundsText, { color: theme.muted }]}>Uploaded points: {points.length}</Text>
+          <Text style={[styles.boundsText, { color: theme.muted }]}>Windowed points: {analysisPoints.length}</Text>
           <Text style={[styles.boundsText, { color: theme.muted }]}>Vehicle routes: {routeGroups.length}</Text>
           <Text style={[styles.boundsText, { color: theme.muted }]}>Road-routed stops: {routedStopCount}</Text>
           <Text style={[styles.boundsText, { color: theme.muted }]}>Hotspot groups: {hotspots.length}</Text>
@@ -898,8 +1088,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 12,
   },
+  buttonSecondary: {
+    borderWidth: 1,
+  },
+  buttonDisabled: {
+    opacity: 0.65,
+  },
   buttonText: {
     color: '#f8fafc',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  buttonSecondaryText: {
     fontSize: 15,
     fontWeight: '700',
   },
@@ -1003,6 +1203,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+  },
+  lookbackRow: {
+    gap: 10,
+  },
+  lookbackInputWrap: {
+    maxWidth: 280,
+    gap: 6,
+  },
+  lookbackPresetRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  lookbackPresetButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  lookbackPresetButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   inputBlock: {
     flexGrow: 1,

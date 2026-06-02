@@ -110,18 +110,70 @@ type CoordinateQuality = {
   scaledPairs: number;
 };
 
+type SamsaraVehicleStat = {
+  id: string | number;
+  name?: string;
+  gps?: {
+    time?: string;
+    latitude?: number;
+    longitude?: number;
+    speedMilesPerHour?: number;
+    reverseGeo?: {
+      formattedLocation?: string;
+    };
+    address?: {
+      name?: string;
+    };
+  };
+};
+
+type SamsaraVehicleStatsResponse = {
+  data?: SamsaraVehicleStat[];
+};
+
 const INVOICE_LAT_ALIASES = ['lat', 'invoice_lat', 'invoice_latitude'];
 const INVOICE_LNG_ALIASES = ['lng', 'lon', 'long', 'invoice_lng', 'invoice_longitude'];
 const ARRIVED_LAT_ALIASES = ['arrived_lat', 'arrival_lat', 'arrive_lat'];
 const ARRIVED_LNG_ALIASES = ['arrived_lng', 'arrived_lon', 'arrival_lng', 'arrive_lng'];
 const WH_ID_ALIASES = ['wh_id', 'warehouse_id', 'distribution_center', 'dc_id', 'dc'];
-const OFFENDER_ALIASES = ['route', 'wh_id', 'driver_id', 'vehicle_id', 'truck_id', 'unit_id'];
+const OFFENDER_ALIASES = [
+  'route',
+  'wh_id',
+  'driver_id',
+  'vehicle_id',
+  'truck_id',
+  'unit_id',
+  'truck',
+  'truck_name',
+  'vehicle_name',
+  'unit_name',
+  'samsara_vehicle_name',
+];
 const INVOICE_ID_ALIASES = ['invoice', 'invoice_id', 'order_id'];
 const CUSTOMER_ALIASES = ['customer_name', 'customer', 'customername', 'account_name', 'account', 'store_name', 'ship_to_name', 'bill_to_company_name'];
 const INVOICE_TIME_ALIASES = ['invoice_time', 'invoice_datetime', 'invoice_ts', 'scheduled_time', 'requested_time'];
 const ARRIVED_TIME_ALIASES = ['arrived_time', 'arrival_time', 'arrived_at', 'arrival_datetime', 'arrived_ts'];
 const DATE_ALIASES = ['date', 'invoice_date', 'service_date'];
 const OFFENDERS_PER_PAGE = 25;
+const SAMSARA_PROXY_PROD_BASE = 'https://latlng-visualization-app.onrender.com/samsara';
+
+function resolveSamsaraProxyBases(): string[] {
+  const localBase = 'http://localhost:3001/samsara';
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocalHost = host === 'localhost' || host === '127.0.0.1';
+
+    if (isLocalHost) {
+      return [localBase];
+    }
+
+    // Never call non-TLS localhost from an HTTPS hosted page (mixed-content fetch failure).
+    return [SAMSARA_PROXY_PROD_BASE];
+  }
+
+  return [SAMSARA_PROXY_PROD_BASE];
+}
 
 const lightTheme = {
   pageBg: '#f8fafc',
@@ -300,7 +352,7 @@ function detectKeys(rows: DataRow[]): KeySelection {
   const arrivedLatKey = pickExactKey(allKeys, ARRIVED_LAT_ALIASES) ?? pickContainsKey(allKeys, ['arrived_lat', 'arrival_lat']);
   const arrivedLngKey = pickExactKey(allKeys, ARRIVED_LNG_ALIASES) ?? pickContainsKey(allKeys, ['arrived_lng', 'arrival_lng']);
   const whIdKey = pickExactKey(allKeys, WH_ID_ALIASES) ?? pickContainsKey(allKeys, ['wh_id', 'warehouse', 'distribution_center', 'dc']);
-  const offenderKey = pickExactKey(allKeys, OFFENDER_ALIASES) ?? pickContainsKey(allKeys, ['route', 'wh', 'driver', 'vehicle']);
+  const offenderKey = pickExactKey(allKeys, OFFENDER_ALIASES) ?? pickContainsKey(allKeys, ['route', 'wh', 'driver', 'vehicle', 'truck', 'unit']);
   const invoiceIdKey = pickExactKey(allKeys, INVOICE_ID_ALIASES) ?? pickContainsKey(allKeys, ['invoice']);
   const customerKey = pickExactKey(allKeys, CUSTOMER_ALIASES) ?? pickContainsKey(allKeys, ['customer', 'account', 'store', 'ship_to']);
   const invoiceTimeKey = pickExactKey(allKeys, INVOICE_TIME_ALIASES) ?? pickContainsKey(allKeys, ['invoice_time', 'scheduled_time', 'requested_time']);
@@ -697,9 +749,11 @@ export default function ImpactScreen() {
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
   const [isParsingFile, setIsParsingFile] = useState(false);
+  const [isSamsaraLoading, setIsSamsaraLoading] = useState(false);
   const [parseProgressPct, setParseProgressPct] = useState(0);
   const [parseProgressLabel, setParseProgressLabel] = useState('Idle');
   const [thresholdText, setThresholdText] = useState('1');
+  const [lookbackHoursText, setLookbackHoursText] = useState('48');
   const [selectedOffender, setSelectedOffender] = useState<string | null>(null);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [offenderPage, setOffenderPage] = useState(1);
@@ -717,6 +771,11 @@ export default function ImpactScreen() {
     const parsed = Number(thresholdText);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
   }, [thresholdText]);
+
+  const lookbackHours = useMemo(() => {
+    const parsed = Number(lookbackHoursText);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 48;
+  }, [lookbackHoursText]);
 
   const keys = useMemo(() => detectKeys(rows), [rows]);
 
@@ -810,18 +869,77 @@ export default function ImpactScreen() {
   const points = parsedPoints.points;
   const coordinateQuality = parsedPoints.quality;
 
-  const whIdOptions = useMemo(() => {
-    const uniqueWhIds = Array.from(new Set(points.map((point) => point.whId))).sort((left, right) => left.localeCompare(right));
-    return ['All', ...uniqueWhIds];
-  }, [points]);
+  const pointsWithTimestampCount = useMemo(
+    () => points.filter((point) => (point.arrivedTimeMs ?? point.invoiceTimeMs) != null).length,
+    [points]
+  );
 
-  const whFilteredPoints = useMemo(() => {
-    if (selectedWhId === 'All') {
+  const windowedPoints = useMemo(() => {
+    if (points.length === 0) {
       return points;
     }
 
-    return points.filter((point) => point.whId === selectedWhId);
-  }, [points, selectedWhId]);
+    // Keep a rolling lookback per offender/truck using each group's latest timestamp.
+    const grouped = new Map<string, DiscrepancyPoint[]>();
+    for (const point of points) {
+      const groupKey = point.offender;
+      const existing = grouped.get(groupKey) ?? [];
+      existing.push(point);
+      grouped.set(groupKey, existing);
+    }
+
+    const lookbackMs = lookbackHours * 60 * 60 * 1000;
+    const filtered: DiscrepancyPoint[] = [];
+
+    for (const groupPoints of grouped.values()) {
+      const latestTimestamp = groupPoints.reduce<number | null>((latest, point) => {
+        const pointTimestamp = point.arrivedTimeMs ?? point.invoiceTimeMs;
+        if (pointTimestamp == null) {
+          return latest;
+        }
+
+        if (latest == null || pointTimestamp > latest) {
+          return pointTimestamp;
+        }
+
+        return latest;
+      }, null);
+
+      if (latestTimestamp == null) {
+        filtered.push(...groupPoints);
+        continue;
+      }
+
+      const cutoff = latestTimestamp - lookbackMs;
+      filtered.push(...groupPoints.filter((point) => {
+        const pointTimestamp = point.arrivedTimeMs ?? point.invoiceTimeMs;
+        return pointTimestamp != null && pointTimestamp >= cutoff;
+      }));
+    }
+
+    return filtered;
+  }, [lookbackHours, points]);
+
+  const timeFilteredOutCount = points.length - windowedPoints.length;
+
+  const whIdOptions = useMemo(() => {
+    const uniqueWhIds = Array.from(new Set(windowedPoints.map((point) => point.whId))).sort((left, right) => left.localeCompare(right));
+    return ['All', ...uniqueWhIds];
+  }, [windowedPoints]);
+
+  useEffect(() => {
+    if (selectedWhId !== 'All' && !whIdOptions.includes(selectedWhId)) {
+      setSelectedWhId('All');
+    }
+  }, [selectedWhId, whIdOptions]);
+
+  const whFilteredPoints = useMemo(() => {
+    if (selectedWhId === 'All') {
+      return windowedPoints;
+    }
+
+    return windowedPoints.filter((point) => point.whId === selectedWhId);
+  }, [selectedWhId, windowedPoints]);
 
   const filteredPoints = useMemo(() => {
     const normalizedQuery = routeSearchQuery.trim().toLowerCase();
@@ -1441,6 +1559,90 @@ export default function ImpactScreen() {
     }
   }
 
+  async function pullSamsaraSnapshot() {
+    setError('');
+    setIsSamsaraLoading(true);
+
+    try {
+      const proxyBases = resolveSamsaraProxyBases();
+      let lastFailure: Error | null = null;
+      let payload: SamsaraVehicleStatsResponse | null = null;
+
+      for (const proxyBase of proxyBases) {
+        try {
+          const response = await fetch(`${proxyBase}/fleet/vehicles/stats?types=gps`);
+
+          if (!response.ok) {
+            const responseText = await response.text();
+            throw new Error(`Samsara request failed (${response.status}) via ${proxyBase}. ${responseText.slice(0, 140)}`.trim());
+          }
+
+          payload = (await response.json()) as SamsaraVehicleStatsResponse;
+          break;
+        } catch (requestError) {
+          lastFailure = requestError instanceof Error ? requestError : new Error('Samsara request failed.');
+        }
+      }
+
+      if (!payload) {
+        throw lastFailure ?? new Error(
+          'Unable to reach Samsara proxy. If this is the hosted site, deploy server changes to Render so /samsara/* exists. For local testing, run from localhost with server started (cd server && npm start).'
+        );
+      }
+      const stats = Array.isArray(payload.data) ? payload.data : [];
+
+      const parsedRows: DataRow[] = stats
+        .filter((entry) => entry?.gps != null)
+        .map((entry, index) => {
+          const gps = entry.gps;
+          const truckName = String(entry.name ?? '').trim() || `Truck ${entry.id}`;
+          const timestamp = gps?.time ?? null;
+          const dateLabel = timestamp ? String(timestamp).slice(0, 10) : null;
+
+          return {
+            invoice_lat: gps?.latitude ?? null,
+            invoice_lng: gps?.longitude ?? null,
+            arrived_lat: gps?.latitude ?? null,
+            arrived_lng: gps?.longitude ?? null,
+            truck: truckName,
+            route: truckName,
+            truck_id: String(entry.id ?? index + 1),
+            invoice: `samsara-${entry.id ?? index + 1}`,
+            customer_name: gps?.address?.name ?? gps?.reverseGeo?.formattedLocation ?? truckName,
+            invoice_time: timestamp,
+            arrived_time: timestamp,
+            date: dateLabel,
+            wh_id: 'SAMSARA',
+            source: 'samsara_live',
+            speed_mph: gps?.speedMilesPerHour ?? null,
+          };
+        })
+        .filter((row) => Number.isFinite(Number(row.invoice_lat)) && Number.isFinite(Number(row.invoice_lng)));
+
+      if (parsedRows.length === 0) {
+        throw new Error('Samsara returned no vehicles with valid GPS coordinates.');
+      }
+
+      setRows(parsedRows);
+      setFileName(`Samsara impact snapshot (${parsedRows.length} vehicles)`);
+      setSelectedOffender(null);
+      setSelectedStopId(null);
+      setOffenderPage(1);
+      setSelectedWhId('All');
+      setIsWhDropdownOpen(false);
+      setRouteSearchQuery('');
+      setStopSearchQuery('');
+      setStopThresholdOnly(false);
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : 'Unable to fetch Samsara vehicle snapshot.';
+      setError(message);
+      setRows([]);
+      setFileName('');
+    } finally {
+      setIsSamsaraLoading(false);
+    }
+  }
+
   return (
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.pageBg }]}>
       <View style={[styles.hero, { backgroundColor: theme.heroBg }]}>
@@ -1470,6 +1672,20 @@ export default function ImpactScreen() {
               isParsingFile ? styles.buttonDisabled : null,
             ]}>
             <Text style={styles.buttonText}>{isParsingFile ? 'Parsing File...' : 'Upload Invoice/Arrival File'}</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={pullSamsaraSnapshot}
+            disabled={isSamsaraLoading}
+            style={[
+              styles.button,
+              styles.buttonSecondary,
+              { backgroundColor: theme.inputBg, borderColor: theme.inputBorder },
+              isSamsaraLoading ? styles.buttonDisabled : null,
+            ]}>
+            <Text style={[styles.buttonSecondaryText, { color: theme.bodyText }]}>
+              {isSamsaraLoading ? 'Loading Samsara...' : 'Pull Samsara Snapshot'}
+            </Text>
           </Pressable>
 
           <View style={[styles.progressShell, { borderColor: theme.inputBorder, backgroundColor: theme.inputBg }]}>
@@ -1578,7 +1794,45 @@ export default function ImpactScreen() {
               style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
             />
           </View>
+
+          <View style={styles.thresholdBlock}>
+            <Text style={[styles.label, { color: theme.mutedText }]}>Per-truck lookback window (hours)</Text>
+            <TextInput
+              value={lookbackHoursText}
+              onChangeText={setLookbackHoursText}
+              keyboardType="numeric"
+              style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+            />
+            <View style={styles.lookbackPresetRow}>
+              {[24, 48, 72].map((hours) => {
+                const isActive = lookbackHours === hours;
+
+                return (
+                  <Pressable
+                    key={`lookback-${hours}`}
+                    onPress={() => setLookbackHoursText(String(hours))}
+                    style={[
+                      styles.lookbackPresetButton,
+                      {
+                        backgroundColor: isActive ? theme.accent : theme.inputBg,
+                        borderColor: isActive ? theme.accent : theme.inputBorder,
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{hours}h</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
         </View>
+        <Text style={[styles.helpText, { color: theme.mutedText }]}>Rolling window: last {lookbackHours}h per offender/truck, anchored to each offender's latest timestamp.</Text>
+        {pointsWithTimestampCount === 0 ? (
+          <Text style={[styles.helpText, { color: theme.mutedText }]}>No parseable invoice/arrived timestamps detected yet, so all points are currently included.</Text>
+        ) : null}
+        {pointsWithTimestampCount > 0 && timeFilteredOutCount > 0 ? (
+          <Text style={[styles.helpText, { color: theme.mutedText }]}>Filtered out {timeFilteredOutCount} older point(s) outside the active per-truck window.</Text>
+        ) : null}
       </View>
 
       <View style={styles.metricsRow}>
@@ -2028,7 +2282,7 @@ export default function ImpactScreen() {
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
             <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Top Offenders (Tap to View on Map)</Text>
             <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
-              WH_ID: {selectedWhId} | Route filter: {routeSearchQuery.trim() || 'All'} | Showing {pageStartCount}-{pageEndCount} of {offenderSummaries.length} offenders.
+              WH_ID: {selectedWhId} | Route filter: {routeSearchQuery.trim() || 'All'} | Window: last {lookbackHours}h per offender | Showing {pageStartCount}-{pageEndCount} of {offenderSummaries.length} offenders.
             </Text>
             {pagedOffenderSummaries.map((summary) => (
               <Pressable
@@ -2166,11 +2420,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+  buttonSecondary: {
+    borderWidth: 1,
+  },
   buttonDisabled: {
     opacity: 0.7,
   },
   buttonText: {
     color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  buttonSecondaryText: {
     fontWeight: '700',
     fontSize: 13,
   },
@@ -2213,6 +2474,22 @@ const styles = StyleSheet.create({
   thresholdBlock: {
     minWidth: 220,
     gap: 4,
+  },
+  lookbackPresetRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  lookbackPresetButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  lookbackPresetButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   dropdownWrap: {
     position: 'relative',
