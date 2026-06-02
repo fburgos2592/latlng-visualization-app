@@ -707,6 +707,7 @@ export default function ImpactScreen() {
   const [stopThresholdOnly, setStopThresholdOnly] = useState(false);
   const [isPlaybackActive, setIsPlaybackActive] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
 
   const thresholdMiles = useMemo(() => {
@@ -1074,6 +1075,92 @@ export default function ImpactScreen() {
     }
 
     await Linking.openURL(activeRouteMapUrl);
+  }
+
+  function exportDailySummaryWorkbook() {
+    if (!outlierAnalysis.snapshot) {
+      setError('Upload a file first so there is summary data to export.');
+      return;
+    }
+
+    const snapshot = outlierAnalysis.snapshot;
+    const workbook = XLSX.utils.book_new();
+    const summaryRows = [
+      { Metric: 'File Name', Value: fileName || 'Uploaded file' },
+      { Metric: 'Parsed Rows', Value: rows.length },
+      { Metric: 'Valid Mismatch Points', Value: filteredPoints.length },
+      { Metric: 'Drivers/Routes', Value: snapshot.offenderCount },
+      { Metric: 'Outlier Stops', Value: snapshot.outlierStopCount },
+      { Metric: 'Outlier Rate', Value: Number((snapshot.outlierRate * 100).toFixed(2)) },
+      { Metric: `Over ${thresholdMiles} mi`, Value: snapshot.overThresholdCount },
+      { Metric: `Over ${thresholdMiles} mi Rate`, Value: Number((snapshot.overThresholdRate * 100).toFixed(2)) },
+      { Metric: 'Median Mismatch (mi)', Value: Number(snapshot.medianMiles.toFixed(4)) },
+      { Metric: 'P95 Mismatch (mi)', Value: Number(snapshot.p95Miles.toFixed(4)) },
+      { Metric: 'Avg Absolute Time Delta (min)', Value: Number(snapshot.avgAbsTimeDeltaMinutes.toFixed(2)) },
+      { Metric: 'Excluded Invalid Coord Rows', Value: coordinateQuality.excludedRows },
+      { Metric: 'Swapped Coord Pairs (Auto-fixed)', Value: coordinateQuality.swappedPairs },
+      { Metric: 'Scaled Coord Pairs (Auto-fixed)', Value: coordinateQuality.scaledPairs },
+    ];
+
+    const followUpRows = outlierAnalysis.followUpQueue.map((entry, index) => ({
+      Rank: index + 1,
+      RouteOrDriver: entry.offender,
+      Stops: entry.stopCount,
+      OutlierStops: entry.outlierStopCount,
+      OutlierRatePct: Number((entry.outlierRate * 100).toFixed(2)),
+      OverThresholdStops: entry.overThresholdCount,
+      OverThresholdRatePct: Number((entry.overThresholdRate * 100).toFixed(2)),
+      AvgMismatchMiles: Number(entry.averageMiles.toFixed(4)),
+      MaxMismatchMiles: Number(entry.maxMiles.toFixed(4)),
+      AvgAbsTimeDeltaMin: Number(entry.avgAbsTimeDeltaMinutes.toFixed(2)),
+      FollowUpScore: Number(entry.followUpScore.toFixed(2)),
+    }));
+
+    const outlierRows = outlierAnalysis.outlierStops.map((entry, index) => ({
+      Rank: index + 1,
+      RouteOrDriver: entry.point.offender,
+      InvoiceId: entry.point.invoiceId,
+      Customer: entry.point.customerName ?? 'Unknown customer',
+      WhId: entry.point.whId,
+      DistanceMiles: Number(entry.point.distanceMiles.toFixed(4)),
+      TimeDeltaMinutes: entry.point.timeDeltaMinutes != null ? Number(entry.point.timeDeltaMinutes.toFixed(2)) : null,
+      ReasonFlags: entry.reasons.join(' | '),
+      OutlierScore: Number(entry.score.toFixed(2)),
+      InvoiceLat: Number(entry.point.invoiceLat.toFixed(6)),
+      InvoiceLng: Number(entry.point.invoiceLng.toFixed(6)),
+      ArrivedLat: Number(entry.point.arrivedLat.toFixed(6)),
+      ArrivedLng: Number(entry.point.arrivedLng.toFixed(6)),
+      InvoiceTime: entry.point.invoiceTimeDisplay,
+      ArrivedTime: entry.point.arrivedTimeDisplay,
+      DateLabel: entry.point.dateLabel ?? '',
+    }));
+
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Summary');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(followUpRows), 'FollowUpQueue');
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(outlierRows), 'OutlierStops');
+
+    const fileBase = (fileName || 'impact_daily_summary').replace(/\.[^.]+$/, '');
+    const safeBase = fileBase.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 80) || 'impact_daily_summary';
+    const exportName = `${safeBase}_follow_up.xlsx`;
+
+    if (Platform.OS !== 'web') {
+      setError('Excel export is currently available on web mode.');
+      return;
+    }
+
+    const workbookBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([workbookBuffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = exportName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(objectUrl);
+    setError('');
   }
 
   const globalOverThreshold = useMemo(
@@ -1453,79 +1540,105 @@ export default function ImpactScreen() {
       ) : null}
 
       {outlierAnalysis.snapshot ? (
-        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
-          <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Daily Summary + Follow-up Queue</Text>
-          <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
-            Upload yesterday&apos;s file to see the fastest list of routes/trucks/drivers that need follow-up first.
-          </Text>
+        <View style={styles.summaryPopoutWrap} pointerEvents="box-none">
+          <View
+            style={[
+              styles.summaryPopoutShell,
+              {
+                backgroundColor: theme.cardBg,
+                borderColor: theme.cardBorder,
+                shadowColor: darkMode ? '#020617' : '#0f172a',
+                width: isSummaryDrawerOpen ? (Platform.OS === 'web' ? 440 : 330) : 60,
+              },
+            ]}>
+            <Pressable
+              onPress={() => setIsSummaryDrawerOpen((value) => !value)}
+              style={[styles.summaryPopoutTab, { backgroundColor: theme.accent }]}
+            >
+              <Text style={styles.summaryPopoutTabGlyph}>{isSummaryDrawerOpen ? '»' : '«'}</Text>
+              <Text style={styles.summaryPopoutTabText}>Queue</Text>
+            </Pressable>
 
-          <View style={styles.metricsRow}>
-            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
-              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Drivers/Routes</Text>
-              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.offenderCount}</Text>
-            </View>
-            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
-              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Stops</Text>
-              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.outlierStopCount}</Text>
-            </View>
-            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
-              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Rate</Text>
-              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{formatPct(outlierAnalysis.snapshot.outlierRate)}</Text>
-            </View>
-            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
-              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Median / P95 Mismatch</Text>
-              <Text style={[styles.metricValue, { color: theme.metricValue }]}>
-                {outlierAnalysis.snapshot.medianMiles.toFixed(2)} / {outlierAnalysis.snapshot.p95Miles.toFixed(2)} mi
-              </Text>
-            </View>
-          </View>
+            {isSummaryDrawerOpen ? (
+              <View style={styles.summaryPopoutBody}>
+                <View style={[styles.summaryPopoutHeader, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                  <Text style={[styles.summaryPopoutTitle, { color: theme.bodyText }]}>Daily Summary + Follow-up Queue</Text>
+                  <Text style={[styles.summaryPopoutCopy, { color: theme.mutedText }]}>Fastest route/driver follow-up list for the day.</Text>
+                  <Pressable onPress={exportDailySummaryWorkbook} style={[styles.summaryExportButton, { backgroundColor: theme.accent }]}>
+                    <Text style={styles.summaryExportButtonText}>Export Excel</Text>
+                  </Pressable>
+                </View>
 
-          <View style={styles.followUpGrid}>
-            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Follow-up Drivers/Routes</Text>
-              {outlierAnalysis.followUpQueue.slice(0, 8).map((entry, index) => (
-                <Pressable
-                  key={`follow-up-${entry.offender}`}
-                  onPress={() => setSelectedOffender(entry.offender)}
-                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
-                >
-                  <View style={styles.followUpNameWrap}>
-                    <Text style={[styles.followUpRank, { color: theme.accent }]}>#{index + 1}</Text>
-                    <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>{entry.offender}</Text>
+                <ScrollView style={styles.summaryPopoutScroll} nestedScrollEnabled>
+                  <View style={styles.summaryMetricGrid}>
+                    <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+                      <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Drivers/Routes</Text>
+                      <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.offenderCount}</Text>
+                    </View>
+                    <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+                      <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Stops</Text>
+                      <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.outlierStopCount}</Text>
+                    </View>
+                    <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+                      <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Rate</Text>
+                      <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{formatPct(outlierAnalysis.snapshot.outlierRate)}</Text>
+                    </View>
+                    <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+                      <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Median / P95</Text>
+                      <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>
+                        {outlierAnalysis.snapshot.medianMiles.toFixed(2)} / {outlierAnalysis.snapshot.p95Miles.toFixed(2)} mi
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]}>
-                    {entry.outlierStopCount}/{entry.stopCount} outliers | {entry.maxMiles.toFixed(2)} mi max
-                  </Text>
-                </Pressable>
-              ))}
-              {outlierAnalysis.followUpQueue.length === 0 ? (
-                <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No follow-up rows yet.</Text>
-              ) : null}
-            </View>
 
-            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
-              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Outlier Stops</Text>
-              {outlierAnalysis.outlierStops.slice(0, 8).map((entry) => (
-                <Pressable
-                  key={`outlier-${entry.point.id}-${entry.point.offender}`}
-                  onPress={() => {
-                    setSelectedOffender(entry.point.offender);
-                    setSelectedStopId(pointSelectionKey(entry.point));
-                  }}
-                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
-                >
-                  <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>
-                    {entry.point.offender} | Invoice {entry.point.invoiceId}
-                  </Text>
-                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]} numberOfLines={1}>
-                    {entry.point.distanceMiles.toFixed(2)} mi | {entry.reasons.join(' • ')}
-                  </Text>
-                </Pressable>
-              ))}
-              {outlierAnalysis.outlierStops.length === 0 ? (
-                <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No outliers detected with current threshold/filter.</Text>
-              ) : null}
-            </View>
+                  <View style={styles.followUpGrid}>
+                    <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
+                      <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Follow-up Drivers/Routes</Text>
+                      {outlierAnalysis.followUpQueue.slice(0, 8).map((entry, index) => (
+                        <Pressable
+                          key={`follow-up-${entry.offender}`}
+                          onPress={() => {
+                            setSelectedOffender(entry.offender);
+                            setIsSummaryDrawerOpen(false);
+                          }}
+                          style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                        >
+                          <View style={styles.followUpNameWrap}>
+                            <Text style={[styles.followUpRank, { color: theme.accent }]}>#{index + 1}</Text>
+                            <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>{entry.offender}</Text>
+                          </View>
+                          <Text style={[styles.followUpMeta, { color: theme.mutedText }]}>
+                            {entry.outlierStopCount}/{entry.stopCount} outliers | {entry.maxMiles.toFixed(2)} mi max
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
+                      <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Outlier Stops</Text>
+                      {outlierAnalysis.outlierStops.slice(0, 8).map((entry) => (
+                        <Pressable
+                          key={`outlier-${entry.point.id}-${entry.point.offender}`}
+                          onPress={() => {
+                            setSelectedOffender(entry.point.offender);
+                            setSelectedStopId(pointSelectionKey(entry.point));
+                            setIsSummaryDrawerOpen(false);
+                          }}
+                          style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                        >
+                          <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>
+                            {entry.point.offender} | Invoice {entry.point.invoiceId}
+                          </Text>
+                          <Text style={[styles.followUpMeta, { color: theme.mutedText }]} numberOfLines={2}>
+                            {entry.point.distanceMiles.toFixed(2)} mi | {entry.reasons.join(' • ')}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  </View>
+                </ScrollView>
+              </View>
+            ) : null}
           </View>
         </View>
       ) : null}
@@ -1832,6 +1945,7 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
     backgroundColor: '#f8fafc',
     gap: 14,
+    position: 'relative',
   },
   hero: {
     borderRadius: 18,
@@ -2361,5 +2475,96 @@ const styles = StyleSheet.create({
   followUpMeta: {
     fontSize: 11,
     lineHeight: 16,
+  },
+  summaryPopoutWrap: {
+    position: 'absolute',
+    top: 210,
+    right: 0,
+    zIndex: 120,
+  },
+  summaryPopoutShell: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderTopLeftRadius: 18,
+    borderBottomLeftRadius: 18,
+    overflow: 'hidden',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+    minHeight: 70,
+  },
+  summaryPopoutTab: {
+    width: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 3,
+    paddingVertical: 8,
+  },
+  summaryPopoutTabGlyph: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '900',
+    lineHeight: 22,
+  },
+  summaryPopoutTabText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  summaryPopoutBody: {
+    flex: 1,
+    maxHeight: 560,
+  },
+  summaryPopoutHeader: {
+    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    gap: 4,
+  },
+  summaryPopoutTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  summaryPopoutCopy: {
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  summaryPopoutScroll: {
+    maxHeight: 470,
+  },
+  summaryMetricGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    padding: 12,
+  },
+  summaryMetricCard: {
+    flexGrow: 1,
+    minWidth: 150,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    gap: 2,
+  },
+  summaryMetricValue: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  summaryExportButton: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  summaryExportButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });
