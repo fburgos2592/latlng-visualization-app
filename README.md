@@ -18,8 +18,14 @@ The app currently ships with a tabbed workflow:
 The Impact tab is designed for operational triage:
 
 - Upload CSV or Excel discrepancy files.
+- See staged parsing progress during upload so large files do not feel opaque.
 - Auto-detect coordinate and key business columns.
+- Tolerate locale-formatted coordinate data, including decimal commas and alternate CSV delimiters.
+- Validate and sanitize suspicious coordinates before distance calculations.
 - Rank top offenders by mismatch severity.
+- Surface a daily summary with outlier counts, median/P95 mismatch, and follow-up recommendations.
+- Keep the follow-up queue available both inline and in a right-side expandable drawer.
+- Export daily summary, follow-up queue, and top outlier stops to Excel.
 - Filter by warehouse (`wh_id`), route/offender search, mismatch threshold, and stop search.
 - Compare a mismatch map with the actual in-route route page side by side.
 - Drill into a stop table with customer, invoice, arrival, coordinates, time delta, and a route risk score.
@@ -64,6 +70,13 @@ Time rendering notes:
 - Spreadsheet numeric serial values are converted to readable wall-clock timestamps in the UI.
 - If source files already contain readable time strings, the app preserves those values for display.
 - Time delta is displayed as `arrived - invoice`.
+
+Coordinate parsing notes:
+
+- Decimal-dot and decimal-comma coordinate formats are both accepted.
+- Common grouping separators and pasted unicode minus signs are normalized before parsing.
+- Invalid coordinate pairs are excluded from distance analysis instead of creating globe-scale false outliers.
+- Some swapped or scaled coordinate pairs are auto-corrected when they can be interpreted safely.
 
 For route-linking, the app also prefers a parseable date field, and it can fall back to a second-column date value when present.
 
@@ -166,4 +179,7 @@ Optional future data source:
 - Impact now includes split-view route comparison, a shared summary bar, stop search, playback, and a selected-stop detail drawer.
 - Impact timeline presentation now shows arrived before invoice in the drawer, stop table, and map popup.
 - Timestamp display was hardened so map and table use the same formatted values.
+- Impact now includes a daily summary section, a matching side follow-up drawer, and one-click Excel export.
+- Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
+- Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.
