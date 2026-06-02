@@ -1540,6 +1540,96 @@ export default function ImpactScreen() {
       ) : null}
 
       {outlierAnalysis.snapshot ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <View style={styles.inlineSummaryHeader}>
+            <View style={styles.inlineSummaryHeaderCopy}>
+              <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Daily Summary + Follow-up Queue</Text>
+              <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>Keep this section visible in-page, or open the side queue for a focused triage view.</Text>
+            </View>
+            <View style={styles.inlineSummaryActions}>
+              <Pressable
+                onPress={() => setIsSummaryDrawerOpen((value) => !value)}
+                style={[styles.inlineSummaryButton, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}
+              >
+                <Text style={[styles.inlineSummaryButtonText, { color: theme.bodyText }]}>
+                  {isSummaryDrawerOpen ? 'Hide Side Queue' : 'Open Side Queue'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={exportDailySummaryWorkbook}
+                style={[styles.inlineSummaryButton, { backgroundColor: theme.accent, borderColor: theme.accent }]}
+              >
+                <Text style={styles.inlineSummaryPrimaryButtonText}>Export Excel</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.summaryMetricGrid}>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Drivers/Routes</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.offenderCount}</Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Stops</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.outlierStopCount}</Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Rate</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{formatPct(outlierAnalysis.snapshot.outlierRate)}</Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Median / P95</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>
+                {outlierAnalysis.snapshot.medianMiles.toFixed(2)} / {outlierAnalysis.snapshot.p95Miles.toFixed(2)} mi
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.inlineSummaryGrid}>
+            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
+              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Follow-up Drivers/Routes</Text>
+              {outlierAnalysis.followUpQueue.slice(0, 5).map((entry, index) => (
+                <Pressable
+                  key={`inline-follow-up-${entry.offender}`}
+                  onPress={() => setSelectedOffender(entry.offender)}
+                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                >
+                  <View style={styles.followUpNameWrap}>
+                    <Text style={[styles.followUpRank, { color: theme.accent }]}>#{index + 1}</Text>
+                    <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>{entry.offender}</Text>
+                  </View>
+                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]}>
+                    {entry.outlierStopCount}/{entry.stopCount} outliers | {entry.maxMiles.toFixed(2)} mi max
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
+              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Outlier Stops</Text>
+              {outlierAnalysis.outlierStops.slice(0, 5).map((entry) => (
+                <Pressable
+                  key={`inline-outlier-${entry.point.id}-${entry.point.offender}`}
+                  onPress={() => {
+                    setSelectedOffender(entry.point.offender);
+                    setSelectedStopId(pointSelectionKey(entry.point));
+                  }}
+                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                >
+                  <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>
+                    {entry.point.offender} | Invoice {entry.point.invoiceId}
+                  </Text>
+                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]} numberOfLines={2}>
+                    {entry.point.distanceMiles.toFixed(2)} mi | {entry.reasons.join(' • ')}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        </View>
+      ) : null}
+
+      {outlierAnalysis.snapshot ? (
         <View style={styles.summaryPopoutWrap} pointerEvents="box-none">
           <View
             style={[
@@ -2475,6 +2565,44 @@ const styles = StyleSheet.create({
   followUpMeta: {
     fontSize: 11,
     lineHeight: 16,
+  },
+  inlineSummaryHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  inlineSummaryHeaderCopy: {
+    flex: 1,
+    minWidth: 240,
+    gap: 4,
+  },
+  inlineSummaryActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  inlineSummaryButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  inlineSummaryButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  inlineSummaryPrimaryButtonText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  inlineSummaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
   },
   summaryPopoutWrap: {
     position: 'absolute',
