@@ -66,6 +66,37 @@ type OffenderSummary = {
   overThresholdRate: number;
 };
 
+type FollowUpSummary = {
+  offender: string;
+  stopCount: number;
+  outlierStopCount: number;
+  outlierRate: number;
+  overThresholdCount: number;
+  overThresholdRate: number;
+  averageMiles: number;
+  maxMiles: number;
+  avgAbsTimeDeltaMinutes: number;
+  followUpScore: number;
+};
+
+type OutlierStop = {
+  point: DiscrepancyPoint;
+  reasons: string[];
+  score: number;
+};
+
+type DatasetSnapshot = {
+  stopCount: number;
+  offenderCount: number;
+  overThresholdCount: number;
+  overThresholdRate: number;
+  outlierStopCount: number;
+  outlierRate: number;
+  medianMiles: number;
+  p95Miles: number;
+  avgAbsTimeDeltaMinutes: number;
+};
+
 const INVOICE_LAT_ALIASES = ['lat', 'invoice_lat', 'invoice_latitude'];
 const INVOICE_LNG_ALIASES = ['lng', 'lon', 'long', 'invoice_lng', 'invoice_longitude'];
 const ARRIVED_LAT_ALIASES = ['arrived_lat', 'arrival_lat', 'arrive_lat'];
@@ -478,6 +509,28 @@ function pointSelectionKey(point: DiscrepancyPoint): string {
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function percentile(sortedValues: number[], pct: number): number {
+  if (sortedValues.length === 0) {
+    return 0;
+  }
+
+  if (sortedValues.length === 1) {
+    return sortedValues[0];
+  }
+
+  const clampedPct = Math.max(0, Math.min(1, pct));
+  const index = (sortedValues.length - 1) * clampedPct;
+  const lowerIndex = Math.floor(index);
+  const upperIndex = Math.ceil(index);
+
+  if (lowerIndex === upperIndex) {
+    return sortedValues[lowerIndex];
+  }
+
+  const weight = index - lowerIndex;
+  return (sortedValues[lowerIndex] * (1 - weight)) + (sortedValues[upperIndex] * weight);
 }
 
 async function readCsvText(asset: DocumentPicker.DocumentPickerAsset): Promise<string> {
@@ -897,6 +950,184 @@ export default function ImpactScreen() {
     [filteredPoints, thresholdMiles]
   );
 
+  const outlierAnalysis = useMemo(() => {
+    if (filteredPoints.length === 0) {
+      return {
+        outlierStops: [] as OutlierStop[],
+        followUpQueue: [] as FollowUpSummary[],
+        snapshot: null as DatasetSnapshot | null,
+      };
+    }
+
+    const distanceValues = filteredPoints.map((point) => point.distanceMiles).sort((left, right) => left - right);
+    const distanceMean = distanceValues.reduce((total, value) => total + value, 0) / distanceValues.length;
+    const distanceVariance = distanceValues.reduce((total, value) => total + ((value - distanceMean) ** 2), 0) / distanceValues.length;
+    const distanceStdDev = Math.sqrt(distanceVariance);
+
+    const q1 = percentile(distanceValues, 0.25);
+    const q3 = percentile(distanceValues, 0.75);
+    const iqr = q3 - q1;
+    const iqrUpperFence = q3 + (1.5 * iqr);
+    const dynamicDistanceThreshold = Math.max(thresholdMiles, iqrUpperFence);
+
+    const absTimeDeltas = filteredPoints
+      .map((point) => Math.abs(point.timeDeltaMinutes ?? 0))
+      .filter((value) => value > 0)
+      .sort((left, right) => left - right);
+    const timeMean = absTimeDeltas.length
+      ? absTimeDeltas.reduce((total, value) => total + value, 0) / absTimeDeltas.length
+      : 0;
+    const timeVariance = absTimeDeltas.length
+      ? absTimeDeltas.reduce((total, value) => total + ((value - timeMean) ** 2), 0) / absTimeDeltas.length
+      : 0;
+    const timeStdDev = Math.sqrt(timeVariance);
+    const dynamicTimeThreshold = Math.max(90, timeMean + (2 * timeStdDev));
+
+    const outlierStops = filteredPoints
+      .map((point) => {
+        const reasons: string[] = [];
+        const absTimeDelta = Math.abs(point.timeDeltaMinutes ?? 0);
+        const distanceZ = distanceStdDev > 0 ? (point.distanceMiles - distanceMean) / distanceStdDev : 0;
+
+        if (point.distanceMiles >= dynamicDistanceThreshold) {
+          reasons.push(`Distance high (${point.distanceMiles.toFixed(2)} mi)`);
+        }
+
+        if (distanceZ >= 2) {
+          reasons.push(`Distance z-score ${distanceZ.toFixed(1)}`);
+        }
+
+        if (point.distanceMiles >= thresholdMiles) {
+          reasons.push(`Over threshold (${thresholdMiles} mi)`);
+        }
+
+        if (absTimeDelta >= dynamicTimeThreshold) {
+          reasons.push(`Time delta high (${Math.round(absTimeDelta)} min)`);
+        }
+
+        if (reasons.length === 0) {
+          return null;
+        }
+
+        const score =
+          (point.distanceMiles * 12) +
+          (Math.max(distanceZ, 0) * 18) +
+          (absTimeDelta * 0.22) +
+          (reasons.length * 4);
+
+        return {
+          point,
+          reasons,
+          score,
+        } satisfies OutlierStop;
+      })
+      .filter((entry): entry is OutlierStop => entry !== null)
+      .sort((left, right) => right.score - left.score);
+
+    const grouped = new Map<string, {
+      stopCount: number;
+      outlierStopCount: number;
+      overThresholdCount: number;
+      totalMiles: number;
+      maxMiles: number;
+      totalAbsTimeDelta: number;
+      timedStops: number;
+    }>();
+
+    for (const point of filteredPoints) {
+      const existing = grouped.get(point.offender) ?? {
+        stopCount: 0,
+        outlierStopCount: 0,
+        overThresholdCount: 0,
+        totalMiles: 0,
+        maxMiles: 0,
+        totalAbsTimeDelta: 0,
+        timedStops: 0,
+      };
+
+      existing.stopCount += 1;
+      existing.totalMiles += point.distanceMiles;
+      existing.maxMiles = Math.max(existing.maxMiles, point.distanceMiles);
+
+      if (point.distanceMiles >= thresholdMiles) {
+        existing.overThresholdCount += 1;
+      }
+
+      if (point.timeDeltaMinutes != null) {
+        existing.totalAbsTimeDelta += Math.abs(point.timeDeltaMinutes);
+        existing.timedStops += 1;
+      }
+
+      grouped.set(point.offender, existing);
+    }
+
+    for (const stop of outlierStops) {
+      const group = grouped.get(stop.point.offender);
+      if (group) {
+        group.outlierStopCount += 1;
+      }
+    }
+
+    const followUpQueue = Array.from(grouped.entries())
+      .map(([offender, value]) => {
+        const outlierRate = value.outlierStopCount / value.stopCount;
+        const overThresholdRate = value.overThresholdCount / value.stopCount;
+        const averageMiles = value.totalMiles / value.stopCount;
+        const avgAbsTimeDeltaMinutes = value.timedStops > 0 ? value.totalAbsTimeDelta / value.timedStops : 0;
+        const followUpScore =
+          (outlierRate * 60) +
+          (overThresholdRate * 30) +
+          (averageMiles * 10) +
+          (value.maxMiles * 4) +
+          (avgAbsTimeDeltaMinutes * 0.2);
+
+        return {
+          offender,
+          stopCount: value.stopCount,
+          outlierStopCount: value.outlierStopCount,
+          outlierRate,
+          overThresholdCount: value.overThresholdCount,
+          overThresholdRate,
+          averageMiles,
+          maxMiles: value.maxMiles,
+          avgAbsTimeDeltaMinutes,
+          followUpScore,
+        } satisfies FollowUpSummary;
+      })
+      .sort((left, right) => {
+        if (right.followUpScore !== left.followUpScore) {
+          return right.followUpScore - left.followUpScore;
+        }
+
+        if (right.outlierRate !== left.outlierRate) {
+          return right.outlierRate - left.outlierRate;
+        }
+
+        return right.maxMiles - left.maxMiles;
+      });
+
+    const avgAbsTimeDeltaMinutes = absTimeDeltas.length
+      ? absTimeDeltas.reduce((total, value) => total + value, 0) / absTimeDeltas.length
+      : 0;
+    const snapshot: DatasetSnapshot = {
+      stopCount: filteredPoints.length,
+      offenderCount: followUpQueue.length,
+      overThresholdCount: filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles).length,
+      overThresholdRate: filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles).length / filteredPoints.length,
+      outlierStopCount: outlierStops.length,
+      outlierRate: outlierStops.length / filteredPoints.length,
+      medianMiles: percentile(distanceValues, 0.5),
+      p95Miles: percentile(distanceValues, 0.95),
+      avgAbsTimeDeltaMinutes,
+    };
+
+    return {
+      outlierStops,
+      followUpQueue,
+      snapshot,
+    };
+  }, [filteredPoints, thresholdMiles]);
+
   async function pickDataFile() {
     setError('');
 
@@ -1079,6 +1310,84 @@ export default function ImpactScreen() {
           <Text style={[styles.metricValue, { color: theme.metricValue }]}>{globalOverThreshold}</Text>
         </View>
       </View>
+
+      {outlierAnalysis.snapshot ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Daily Summary + Follow-up Queue</Text>
+          <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+            Upload yesterday&apos;s file to see the fastest list of routes/trucks/drivers that need follow-up first.
+          </Text>
+
+          <View style={styles.metricsRow}>
+            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Drivers/Routes</Text>
+              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.offenderCount}</Text>
+            </View>
+            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Stops</Text>
+              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{outlierAnalysis.snapshot.outlierStopCount}</Text>
+            </View>
+            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Outlier Rate</Text>
+              <Text style={[styles.metricValue, { color: theme.metricValue }]}>{formatPct(outlierAnalysis.snapshot.outlierRate)}</Text>
+            </View>
+            <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}>
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Median / P95 Mismatch</Text>
+              <Text style={[styles.metricValue, { color: theme.metricValue }]}>
+                {outlierAnalysis.snapshot.medianMiles.toFixed(2)} / {outlierAnalysis.snapshot.p95Miles.toFixed(2)} mi
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.followUpGrid}>
+            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.accentSoft }]}>
+              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Follow-up Drivers/Routes</Text>
+              {outlierAnalysis.followUpQueue.slice(0, 8).map((entry, index) => (
+                <Pressable
+                  key={`follow-up-${entry.offender}`}
+                  onPress={() => setSelectedOffender(entry.offender)}
+                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                >
+                  <View style={styles.followUpNameWrap}>
+                    <Text style={[styles.followUpRank, { color: theme.accent }]}>#{index + 1}</Text>
+                    <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>{entry.offender}</Text>
+                  </View>
+                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]}>
+                    {entry.outlierStopCount}/{entry.stopCount} outliers | {entry.maxMiles.toFixed(2)} mi max
+                  </Text>
+                </Pressable>
+              ))}
+              {outlierAnalysis.followUpQueue.length === 0 ? (
+                <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No follow-up rows yet.</Text>
+              ) : null}
+            </View>
+
+            <View style={[styles.followUpPanel, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
+              <Text style={[styles.followUpTitle, { color: theme.bodyText }]}>Top Outlier Stops</Text>
+              {outlierAnalysis.outlierStops.slice(0, 8).map((entry) => (
+                <Pressable
+                  key={`outlier-${entry.point.id}-${entry.point.offender}`}
+                  onPress={() => {
+                    setSelectedOffender(entry.point.offender);
+                    setSelectedStopId(pointSelectionKey(entry.point));
+                  }}
+                  style={[styles.followUpRow, { borderColor: theme.cardBorder }]}
+                >
+                  <Text style={[styles.followUpName, { color: theme.bodyText }]} numberOfLines={1}>
+                    {entry.point.offender} | Invoice {entry.point.invoiceId}
+                  </Text>
+                  <Text style={[styles.followUpMeta, { color: theme.mutedText }]} numberOfLines={1}>
+                    {entry.point.distanceMiles.toFixed(2)} mi | {entry.reasons.join(' • ')}
+                  </Text>
+                </Pressable>
+              ))}
+              {outlierAnalysis.outlierStops.length === 0 ? (
+                <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No outliers detected with current threshold/filter.</Text>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {activeOffenderSummary ? (
         <>
@@ -1867,5 +2176,49 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontSize: 12,
     textAlign: 'center',
+  },
+  followUpGrid: {
+    marginTop: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  followUpPanel: {
+    flexGrow: 1,
+    minWidth: 260,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+  },
+  followUpTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  followUpRow: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  followUpNameWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  followUpRank: {
+    fontSize: 12,
+    fontWeight: '900',
+    minWidth: 30,
+  },
+  followUpName: {
+    fontSize: 12,
+    fontWeight: '800',
+    flexShrink: 1,
+  },
+  followUpMeta: {
+    fontSize: 11,
+    lineHeight: 16,
   },
 });
