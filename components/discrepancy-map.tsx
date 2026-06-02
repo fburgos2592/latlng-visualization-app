@@ -16,9 +16,18 @@ type DiscrepancyPoint = {
   timeDeltaMinutes: number | null;
 };
 
+type TripHistoryPoint = {
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour?: number;
+};
+
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
+  tripHistoryPoints?: TripHistoryPoint[];
+  showTripHistory?: boolean;
   routeMapUrl?: string | null;
   compareSummary?: {
     date: string | null;
@@ -36,12 +45,12 @@ type DiscrepancyMapProps = {
   onPointSelect?: (pointId: string) => void;
 };
 
-export default function DiscrepancyMap({ points, activeOffender }: DiscrepancyMapProps) {
+export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoints = [], showTripHistory = true }: DiscrepancyMapProps) {
   return (
     <View style={styles.shell}>
       <Text style={styles.title}>Interactive mismatch map is available on web.</Text>
       <Text style={styles.copy}>
-        Load this same file in the browser to inspect invoice vs arrived gaps for {activeOffender} across {points.length} invoices.
+        Load this same file in the browser to inspect invoice vs arrived gaps for {activeOffender} across {points.length} invoices. {tripHistoryPoints.length > 0 && showTripHistory ? 'Samsara trip history is also visible on the web map.' : ''}
       </Text>
     </View>
   );

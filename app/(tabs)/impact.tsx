@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
@@ -17,6 +17,8 @@ type DiscrepancyPoint = {
   arrivedLng: number;
   distanceMiles: number;
   offender: string;
+  truckId: string | null;
+  truckName: string | null;
   whId: string;
   invoiceId: string;
   customerName: string | null;
@@ -50,6 +52,8 @@ type KeySelection = {
   arrivedLngKey: string | null;
   whIdKey: string | null;
   offenderKey: string | null;
+  truckNameKey: string | null;
+  truckIdKey: string | null;
   invoiceIdKey: string | null;
   customerKey: string | null;
   invoiceTimeKey: string | null;
@@ -110,25 +114,67 @@ type CoordinateQuality = {
   scaledPairs: number;
 };
 
-type SamsaraVehicleStat = {
-  id: string | number;
-  name?: string;
-  gps?: {
-    time?: string;
-    latitude?: number;
-    longitude?: number;
-    speedMilesPerHour?: number;
-    reverseGeo?: {
-      formattedLocation?: string;
-    };
-    address?: {
-      name?: string;
-    };
+type SamsaraTripPoint = {
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour?: number;
+  reverseGeo?: {
+    formattedLocation?: string;
+  };
+  address?: {
+    name?: string;
   };
 };
 
-type SamsaraVehicleStatsResponse = {
-  data?: SamsaraVehicleStat[];
+type SamsaraTripVehicle = {
+  id: string | number;
+  name?: string;
+  gps?: SamsaraTripPoint[];
+};
+
+type SamsaraTripHistoryResponse = {
+  data?: SamsaraTripVehicle[];
+};
+
+type SamsaraVehicleRecord = {
+  id: string | number;
+  name?: string;
+};
+
+type SamsaraVehicleListResponse = {
+  data?: SamsaraVehicleRecord[];
+};
+
+type SamsaraTripSegment = {
+  index: number;
+  startTime: string;
+  endTime: string;
+  startLabel: string;
+  endLabel: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  pointCount: number;
+  durationMinutes: number;
+  distanceMiles: number;
+  maxSpeedMph: number;
+};
+
+type SamsaraTripInfo = {
+  vehicleId: string;
+  vehicleName: string;
+  routeLabel: string;
+  dateLabel: string;
+  startTime: string;
+  endTime: string;
+  pointCount: number;
+  segmentCount: number;
+  totalDistanceMiles: number;
+  totalDurationMinutes: number;
+  tripPath: SamsaraTripPoint[];
+  segments: SamsaraTripSegment[];
 };
 
 const INVOICE_LAT_ALIASES = ['lat', 'invoice_lat', 'invoice_latitude'];
@@ -149,6 +195,8 @@ const OFFENDER_ALIASES = [
   'unit_name',
   'samsara_vehicle_name',
 ];
+const TRUCK_NAME_ALIASES = ['truck', 'truck_name', 'vehicle_name', 'unit_name', 'samsara_vehicle_name'];
+const TRUCK_ID_ALIASES = ['truck_id', 'vehicle_id', 'truck number', 'truck_number', 'vehicle number', 'vehicle_number'];
 const INVOICE_ID_ALIASES = ['invoice', 'invoice_id', 'order_id'];
 const CUSTOMER_ALIASES = ['customer_name', 'customer', 'customername', 'account_name', 'account', 'store_name', 'ship_to_name', 'bill_to_company_name'];
 const INVOICE_TIME_ALIASES = ['invoice_time', 'invoice_datetime', 'invoice_ts', 'scheduled_time', 'requested_time'];
@@ -176,25 +224,25 @@ function resolveSamsaraProxyBases(): string[] {
 }
 
 const lightTheme = {
-  pageBg: '#f8fafc',
-  heroBg: '#0b132b',
-  titleText: '#ffffff',
-  subtitleText: '#dbeafe',
+  pageBg: '#f3f6fb',
+  heroBg: '#f3f6fb',
+  titleText: '#0b132b',
+  subtitleText: '#4b5563',
   cardBg: '#ffffff',
-  cardBorder: '#dbe3ef',
+  cardBorder: '#e2e8f0',
   bodyText: '#0f172a',
-  mutedText: '#334155',
-  subtleText: '#475569',
-  accent: '#1d4ed8',
-  accentSoft: '#eff6ff',
-  inputBg: '#eff6ff',
-  inputBorder: '#bfdbfe',
-  metricBg: '#eff6ff',
-  metricBorder: '#dbeafe',
-  metricLabel: '#1e3a8a',
+  mutedText: '#4b5563',
+  subtleText: '#64748b',
+  accent: '#0f766e',
+  accentSoft: '#e8f7f5',
+  inputBg: '#ffffff',
+  inputBorder: '#cbd5e1',
+  metricBg: '#e8f7f5',
+  metricBorder: '#cbd5e1',
+  metricLabel: '#166534',
   metricValue: '#0f172a',
-  selectedRowBg: '#eff6ff',
-  selectedRowBorder: '#1d4ed8',
+  selectedRowBg: '#f6fbff',
+  selectedRowBorder: '#0f766e',
   errorText: '#b91c1c',
 };
 
@@ -353,6 +401,8 @@ function detectKeys(rows: DataRow[]): KeySelection {
   const arrivedLngKey = pickExactKey(allKeys, ARRIVED_LNG_ALIASES) ?? pickContainsKey(allKeys, ['arrived_lng', 'arrival_lng']);
   const whIdKey = pickExactKey(allKeys, WH_ID_ALIASES) ?? pickContainsKey(allKeys, ['wh_id', 'warehouse', 'distribution_center', 'dc']);
   const offenderKey = pickExactKey(allKeys, OFFENDER_ALIASES) ?? pickContainsKey(allKeys, ['route', 'wh', 'driver', 'vehicle', 'truck', 'unit']);
+  const truckNameKey = pickExactKey(allKeys, TRUCK_NAME_ALIASES) ?? pickContainsKey(allKeys, ['truck_name', 'vehicle_name', 'unit_name', 'truck']);
+  const truckIdKey = pickExactKey(allKeys, TRUCK_ID_ALIASES) ?? pickContainsKey(allKeys, ['truck_id', 'vehicle_id', 'truck number', 'vehicle number']);
   const invoiceIdKey = pickExactKey(allKeys, INVOICE_ID_ALIASES) ?? pickContainsKey(allKeys, ['invoice']);
   const customerKey = pickExactKey(allKeys, CUSTOMER_ALIASES) ?? pickContainsKey(allKeys, ['customer', 'account', 'store', 'ship_to']);
   const invoiceTimeKey = pickExactKey(allKeys, INVOICE_TIME_ALIASES) ?? pickContainsKey(allKeys, ['invoice_time', 'scheduled_time', 'requested_time']);
@@ -366,6 +416,8 @@ function detectKeys(rows: DataRow[]): KeySelection {
     arrivedLngKey,
     whIdKey,
     offenderKey,
+    truckNameKey,
+    truckIdKey,
     invoiceIdKey,
     customerKey,
     invoiceTimeKey,
@@ -394,6 +446,11 @@ function getField(row: DataRow, key: string | null): unknown {
 function getSecondColumnValue(row: DataRow): unknown {
   const values = Object.values(row);
   return values.length > 1 ? values[1] : null;
+}
+
+function getThirdColumnValue(row: DataRow): unknown {
+  const values = Object.values(row);
+  return values.length > 2 ? values[2] : null;
 }
 
 function toRadians(value: number): number {
@@ -631,7 +688,7 @@ function normalizeRouteDate(value: unknown): string | null {
   return null;
 }
 
-function pickRouteDate(points: Array<{ dateLabel: string | null }>): string | null {
+function pickRouteDate(points: { dateLabel: string | null }[]): string | null {
   const counts = new Map<string, number>();
 
   for (const point of points) {
@@ -744,12 +801,142 @@ function isSpreadsheetUpload(asset: DocumentPicker.DocumentPickerAsset): boolean
   );
 }
 
+function formatDisplayDateLabel(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(parsed);
+}
+
+function buildUtcDayWindow(dateLabel: string | null): { dateLabel: string; startTime: string; endTime: string } {
+  const fallbackDate = new Date().toISOString().slice(0, 10);
+  const normalizedDate = dateLabel ?? fallbackDate;
+  const startTime = `${normalizedDate}T00:00:00Z`;
+  const endDate = new Date(`${normalizedDate}T00:00:00Z`);
+  endDate.setUTCDate(endDate.getUTCDate() + 1);
+
+  return {
+    dateLabel: normalizedDate,
+    startTime,
+    endTime: endDate.toISOString(),
+  };
+}
+
+function toTripPointList(vehicle: SamsaraTripVehicle): SamsaraTripPoint[] {
+  return Array.isArray(vehicle.gps) ? vehicle.gps : [];
+}
+
+function segmentTripPoints(points: SamsaraTripPoint[]): SamsaraTripSegment[] {
+  if (points.length === 0) {
+    return [];
+  }
+
+  const sortedPoints = [...points].sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime());
+  const segments: SamsaraTripSegment[] = [];
+  const segmentGapMinutes = 20;
+  const segmentGapMiles = 4;
+
+  let currentPoints: SamsaraTripPoint[] = [sortedPoints[0]];
+
+  const pushSegment = (segmentPoints: SamsaraTripPoint[]) => {
+    if (segmentPoints.length < 2) {
+      return;
+    }
+
+    const startPoint = segmentPoints[0];
+    const endPoint = segmentPoints[segmentPoints.length - 1];
+    let distanceMiles = 0;
+    let maxSpeedMph = 0;
+
+    for (let index = 1; index < segmentPoints.length; index += 1) {
+      const leftPoint = segmentPoints[index - 1];
+      const rightPoint = segmentPoints[index];
+      distanceMiles += haversineMiles(leftPoint.latitude, leftPoint.longitude, rightPoint.latitude, rightPoint.longitude);
+      maxSpeedMph = Math.max(maxSpeedMph, rightPoint.speedMilesPerHour ?? 0);
+    }
+
+    const durationMinutes = (new Date(endPoint.time).getTime() - new Date(startPoint.time).getTime()) / 60_000;
+    const index = segments.length + 1;
+
+    segments.push({
+      index,
+      startTime: startPoint.time,
+      endTime: endPoint.time,
+      startLabel: formatEasternDateTime(new Date(startPoint.time).getTime()),
+      endLabel: formatEasternDateTime(new Date(endPoint.time).getTime()),
+      startLat: startPoint.latitude,
+      startLng: startPoint.longitude,
+      endLat: endPoint.latitude,
+      endLng: endPoint.longitude,
+      pointCount: segmentPoints.length,
+      durationMinutes,
+      distanceMiles,
+      maxSpeedMph,
+    });
+  };
+
+  for (let index = 1; index < sortedPoints.length; index += 1) {
+    const previousPoint = currentPoints[currentPoints.length - 1];
+    const currentPoint = sortedPoints[index];
+    const timeGapMinutes = (new Date(currentPoint.time).getTime() - new Date(previousPoint.time).getTime()) / 60_000;
+    const distanceMiles = haversineMiles(previousPoint.latitude, previousPoint.longitude, currentPoint.latitude, currentPoint.longitude);
+    const speedChanged = (previousPoint.speedMilesPerHour ?? 0) <= 0 && (currentPoint.speedMilesPerHour ?? 0) > 0;
+
+    if (timeGapMinutes > segmentGapMinutes || distanceMiles > segmentGapMiles || speedChanged) {
+      pushSegment(currentPoints);
+      currentPoints = [currentPoint];
+      continue;
+    }
+
+    currentPoints.push(currentPoint);
+  }
+
+  pushSegment(currentPoints);
+  return segments;
+}
+
+function extractVehicleName(vehicle: { name?: string; id?: string | number }): string {
+  return String(vehicle.name ?? vehicle.id ?? '').trim();
+}
+
 export default function ImpactScreen() {
+  const windowDimensions = useWindowDimensions();
+  const [layoutWidth, setLayoutWidth] = useState(() => {
+    if (Platform.OS === 'web') {
+      return typeof window !== 'undefined' ? window.innerWidth : 1024;
+    }
+
+    return windowDimensions.width;
+  });
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      const updateWidth = () => setLayoutWidth(window.innerWidth);
+      updateWidth();
+      window.addEventListener('resize', updateWidth);
+
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+
+    setLayoutWidth(windowDimensions.width);
+    return undefined;
+  }, [windowDimensions.width]);
+
+  const isCompactLayout = layoutWidth < 760;
+
   const [rows, setRows] = useState<DataRow[]>([]);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
   const [isParsingFile, setIsParsingFile] = useState(false);
-  const [isSamsaraLoading, setIsSamsaraLoading] = useState(false);
+  const [isTripLoading, setIsTripLoading] = useState(false);
+  const [samsaraTripInfo, setSamsaraTripInfo] = useState<SamsaraTripInfo | null>(null);
   const [parseProgressPct, setParseProgressPct] = useState(0);
   const [parseProgressLabel, setParseProgressLabel] = useState('Idle');
   const [thresholdText, setThresholdText] = useState('1');
@@ -757,12 +944,16 @@ export default function ImpactScreen() {
   const [selectedOffender, setSelectedOffender] = useState<string | null>(null);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [offenderPage, setOffenderPage] = useState(1);
+  const [tripPage, setTripPage] = useState(1);
   const [selectedWhId, setSelectedWhId] = useState('All');
   const [isWhDropdownOpen, setIsWhDropdownOpen] = useState(false);
   const [routeSearchQuery, setRouteSearchQuery] = useState('');
   const [stopSearchQuery, setStopSearchQuery] = useState('');
   const [stopThresholdOnly, setStopThresholdOnly] = useState(false);
   const [isPlaybackActive, setIsPlaybackActive] = useState(false);
+  const [isTripOverlayVisible, setIsTripOverlayVisible] = useState(true);
+  const [isTripDrawerOpen, setIsTripDrawerOpen] = useState(true);
+  const [isStopDrawerOpen, setIsStopDrawerOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
@@ -819,6 +1010,10 @@ export default function ImpactScreen() {
       const whId = String(whIdRaw ?? '').trim() || 'Unknown WH';
       const offenderRaw = getField(row, keys.offenderKey);
       const offender = String(offenderRaw ?? '').trim() || 'Unknown';
+      const truckNameRaw = getField(row, keys.truckNameKey) ?? getThirdColumnValue(row);
+      const truckName = String(truckNameRaw ?? '').trim() || null;
+      const truckIdRaw = getField(row, keys.truckIdKey);
+      const truckId = String(truckIdRaw ?? '').trim() || null;
       const invoiceRaw = getField(row, keys.invoiceIdKey);
       const invoiceId = String(invoiceRaw ?? '').trim() || `row-${rowIndex + 1}`;
       const customerRaw = getField(row, keys.customerKey);
@@ -847,6 +1042,8 @@ export default function ImpactScreen() {
         arrivedLng: arrivedPair.lng,
         distanceMiles,
         offender,
+        truckId,
+        truckName,
         whId,
         invoiceId,
         customerName,
@@ -864,7 +1061,7 @@ export default function ImpactScreen() {
     }, { points: [], quality: initialQuality });
 
     return result;
-  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.whIdKey, rows]);
+  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.truckIdKey, keys.truckNameKey, keys.whIdKey, rows]);
 
   const points = parsedPoints.points;
   const coordinateQuality = parsedPoints.quality;
@@ -1034,6 +1231,30 @@ export default function ImpactScreen() {
       .slice(0, 120);
   }, [activeOffenderSummary, filteredPoints]);
 
+  const activeTruckId = useMemo(() => {
+    const truckIds = Array.from(new Set(activeOffenderPoints.map((point) => point.truckId).filter((value): value is string => Boolean(value))));
+    return truckIds.length === 1 ? truckIds[0] : null;
+  }, [activeOffenderPoints]);
+
+  const activeTruckName = useMemo(() => {
+    const truckNames = Array.from(new Set(activeOffenderPoints.map((point) => point.truckName).filter((value): value is string => Boolean(value))));
+    return truckNames.length === 1 ? truckNames[0] : null;
+  }, [activeOffenderPoints]);
+
+  const samsaraTripPoints = useMemo(() => samsaraTripInfo?.tripPath ?? [], [samsaraTripInfo]);
+  const totalTripPages = Math.max(1, Math.ceil((samsaraTripInfo?.segments.length ?? 0) / 10));
+  const visibleTripPage = Math.min(tripPage, totalTripPages);
+  const pagedTripSegments = useMemo(() => {
+    const startIndex = (visibleTripPage - 1) * 10;
+    return samsaraTripInfo?.segments.slice(startIndex, startIndex + 10) ?? [];
+  }, [samsaraTripInfo, visibleTripPage]);
+  const tripPageStartCount = samsaraTripInfo && samsaraTripInfo.segments.length > 0 ? ((visibleTripPage - 1) * 10) + 1 : 0;
+  const tripPageEndCount = Math.min(visibleTripPage * 10, samsaraTripInfo?.segments.length ?? 0);
+
+  useEffect(() => {
+    setTripPage(1);
+  }, [samsaraTripInfo?.vehicleId, samsaraTripInfo?.routeLabel, samsaraTripInfo?.dateLabel]);
+
   const stopTablePoints = useMemo(() => {
     const normalizedQuery = stopSearchQuery.trim().toLowerCase();
 
@@ -1190,6 +1411,16 @@ export default function ImpactScreen() {
     return `https://drivercloud.baldorfood.com/DriverApp/LatLng.aspx?date=${encodeURIComponent(date)}&route=${route}&wh_id=${whId}`;
   }, [activeOffenderPoints.length, compareSummary]);
 
+  useEffect(() => {
+    setSamsaraTripInfo(null);
+  }, [activeOffenderSummary?.offender, activeRouteDate]);
+
+  useEffect(() => {
+    if (!samsaraTripInfo) {
+      setIsTripOverlayVisible(false);
+    }
+  }, [samsaraTripInfo]);
+
   async function openActiveRouteMap() {
     if (!activeRouteMapUrl) {
       return;
@@ -1282,6 +1513,114 @@ export default function ImpactScreen() {
     document.body.removeChild(anchor);
     URL.revokeObjectURL(objectUrl);
     setError('');
+  }
+
+  async function loadSamsaraTripHistory() {
+    setError('');
+    setIsTripLoading(true);
+
+    try {
+      const selectedRouteSummary = activeOffenderSummary;
+      if (!selectedRouteSummary) {
+        throw new Error('Select a route/truck first so I can load trip history for that vehicle.');
+      }
+
+      const truckLookupLabel = activeTruckName ?? activeTruckId ?? selectedRouteSummary.offender;
+
+      const proxyBases = resolveSamsaraProxyBases();
+      let lastFailure: Error | null = null;
+
+      for (const proxyBase of proxyBases) {
+        try {
+          const vehiclesResponse = await fetch(`${proxyBase}/fleet/vehicles`);
+          if (!vehiclesResponse.ok) {
+            const responseText = await vehiclesResponse.text();
+            throw new Error(`Samsara vehicles lookup failed (${vehiclesResponse.status}) via ${proxyBase}. ${responseText.slice(0, 140)}`.trim());
+          }
+
+          const vehiclesPayload = await vehiclesResponse.json() as SamsaraVehicleListResponse;
+          const vehicles = Array.isArray(vehiclesPayload.data) ? vehiclesPayload.data : [];
+            const selectedRoute = selectedRouteSummary.offender.trim().toLowerCase();
+            const selectedTruckLabel = truckLookupLabel.trim().toLowerCase();
+          const vehicleMatch = vehicles.find((vehicle) => {
+            const vehicleName = extractVehicleName(vehicle).toLowerCase();
+            const vehicleIdText = String(vehicle.id).toLowerCase();
+
+            return (
+              vehicleIdText === selectedTruckLabel ||
+              vehicleIdText.includes(selectedTruckLabel) ||
+              selectedTruckLabel.includes(vehicleIdText) ||
+              vehicleName === selectedTruckLabel ||
+              vehicleName.includes(selectedTruckLabel) ||
+              selectedTruckLabel.includes(vehicleName) ||
+              vehicleName === selectedRoute ||
+              vehicleName.includes(selectedRoute) ||
+              selectedRoute.includes(vehicleName)
+            );
+          });
+
+          if (!vehicleMatch) {
+            throw new Error(`Could not find a Samsara vehicle that matches truck "${truckLookupLabel}" or route "${selectedRouteSummary.offender}".`);
+          }
+
+          const dayWindow = buildUtcDayWindow(activeRouteDate);
+          const historyParams = new URLSearchParams({
+            types: 'gps',
+            vehicleIds: String(vehicleMatch.id),
+            startTime: dayWindow.startTime,
+            endTime: dayWindow.endTime,
+          });
+
+          const historyResponse = await fetch(`${proxyBase}/fleet/vehicles/stats/history?${historyParams.toString()}`);
+          if (!historyResponse.ok) {
+            const responseText = await historyResponse.text();
+            throw new Error(`Samsara trip history failed (${historyResponse.status}) via ${proxyBase}. ${responseText.slice(0, 180)}`.trim());
+          }
+
+          const historyPayload = await historyResponse.json() as SamsaraTripHistoryResponse;
+          const historyVehicles = Array.isArray(historyPayload.data) ? historyPayload.data : [];
+          const selectedVehicleHistory = historyVehicles.find((vehicle) => String(vehicle.id) === String(vehicleMatch.id)) ?? historyVehicles[0] ?? null;
+          const tripPoints = selectedVehicleHistory ? toTripPointList(selectedVehicleHistory) : [];
+
+          if (tripPoints.length === 0) {
+            throw new Error(`Samsara returned no GPS history for ${selectedRouteSummary.offender} in the selected day window.`);
+          }
+
+          const segments = segmentTripPoints(tripPoints);
+          const totalDistanceMiles = segments.reduce((total, segment) => total + segment.distanceMiles, 0);
+          const totalDurationMinutes = (new Date(tripPoints[tripPoints.length - 1].time).getTime() - new Date(tripPoints[0].time).getTime()) / 60_000;
+
+          setSamsaraTripInfo({
+            vehicleId: String(vehicleMatch.id),
+            vehicleName: extractVehicleName(vehicleMatch),
+            routeLabel: selectedRouteSummary.offender,
+            dateLabel: dayWindow.dateLabel,
+            startTime: tripPoints[0].time,
+            endTime: tripPoints[tripPoints.length - 1].time,
+            pointCount: tripPoints.length,
+            segmentCount: segments.length,
+            totalDistanceMiles,
+            totalDurationMinutes,
+            tripPath: tripPoints,
+            segments,
+          });
+          setIsTripOverlayVisible(true);
+
+          setError('');
+          return;
+        } catch (requestError) {
+          lastFailure = requestError instanceof Error ? requestError : new Error(String(requestError));
+        }
+      }
+
+      throw lastFailure ?? new Error('Unable to reach Samsara proxy. Redeploy Render backend so /samsara/* is available, or run the local server for development.');
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : 'Unable to fetch Samsara trip history.';
+      setError(message);
+      setSamsaraTripInfo(null);
+    } finally {
+      setIsTripLoading(false);
+    }
   }
 
   const globalOverThreshold = useMemo(
@@ -1559,90 +1898,6 @@ export default function ImpactScreen() {
     }
   }
 
-  async function pullSamsaraSnapshot() {
-    setError('');
-    setIsSamsaraLoading(true);
-
-    try {
-      const proxyBases = resolveSamsaraProxyBases();
-      let lastFailure: Error | null = null;
-      let payload: SamsaraVehicleStatsResponse | null = null;
-
-      for (const proxyBase of proxyBases) {
-        try {
-          const response = await fetch(`${proxyBase}/fleet/vehicles/stats?types=gps`);
-
-          if (!response.ok) {
-            const responseText = await response.text();
-            throw new Error(`Samsara request failed (${response.status}) via ${proxyBase}. ${responseText.slice(0, 140)}`.trim());
-          }
-
-          payload = (await response.json()) as SamsaraVehicleStatsResponse;
-          break;
-        } catch (requestError) {
-          lastFailure = requestError instanceof Error ? requestError : new Error('Samsara request failed.');
-        }
-      }
-
-      if (!payload) {
-        throw lastFailure ?? new Error(
-          'Unable to reach Samsara proxy. If this is the hosted site, deploy server changes to Render so /samsara/* exists. For local testing, run from localhost with server started (cd server && npm start).'
-        );
-      }
-      const stats = Array.isArray(payload.data) ? payload.data : [];
-
-      const parsedRows: DataRow[] = stats
-        .filter((entry) => entry?.gps != null)
-        .map((entry, index) => {
-          const gps = entry.gps;
-          const truckName = String(entry.name ?? '').trim() || `Truck ${entry.id}`;
-          const timestamp = gps?.time ?? null;
-          const dateLabel = timestamp ? String(timestamp).slice(0, 10) : null;
-
-          return {
-            invoice_lat: gps?.latitude ?? null,
-            invoice_lng: gps?.longitude ?? null,
-            arrived_lat: gps?.latitude ?? null,
-            arrived_lng: gps?.longitude ?? null,
-            truck: truckName,
-            route: truckName,
-            truck_id: String(entry.id ?? index + 1),
-            invoice: `samsara-${entry.id ?? index + 1}`,
-            customer_name: gps?.address?.name ?? gps?.reverseGeo?.formattedLocation ?? truckName,
-            invoice_time: timestamp,
-            arrived_time: timestamp,
-            date: dateLabel,
-            wh_id: 'SAMSARA',
-            source: 'samsara_live',
-            speed_mph: gps?.speedMilesPerHour ?? null,
-          };
-        })
-        .filter((row) => Number.isFinite(Number(row.invoice_lat)) && Number.isFinite(Number(row.invoice_lng)));
-
-      if (parsedRows.length === 0) {
-        throw new Error('Samsara returned no vehicles with valid GPS coordinates.');
-      }
-
-      setRows(parsedRows);
-      setFileName(`Samsara impact snapshot (${parsedRows.length} vehicles)`);
-      setSelectedOffender(null);
-      setSelectedStopId(null);
-      setOffenderPage(1);
-      setSelectedWhId('All');
-      setIsWhDropdownOpen(false);
-      setRouteSearchQuery('');
-      setStopSearchQuery('');
-      setStopThresholdOnly(false);
-    } catch (caughtError) {
-      const message = caughtError instanceof Error ? caughtError.message : 'Unable to fetch Samsara vehicle snapshot.';
-      setError(message);
-      setRows([]);
-      setFileName('');
-    } finally {
-      setIsSamsaraLoading(false);
-    }
-  }
-
   return (
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.pageBg }]}>
       <View style={[styles.hero, { backgroundColor: theme.heroBg }]}>
@@ -1659,180 +1914,189 @@ export default function ImpactScreen() {
         <Text style={[styles.subtitle, { color: theme.subtitleText }]}>
           Upload invoice vs arrived coordinates, rank highest offenders, and map mismatch lines to size the impact of a geofence-based arrival feature.
         </Text>
-      </View>
-
-      <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}> 
-        <View style={styles.controls}>
-          <Pressable
-            onPress={pickDataFile}
-            disabled={isParsingFile}
+        <View style={[styles.heroActionsRow, isCompactLayout ? styles.heroActionsRowCompact : null]}>
+          <View
             style={[
-              styles.button,
-              { backgroundColor: theme.accent },
-              isParsingFile ? styles.buttonDisabled : null,
+              styles.card,
+              styles.heroFiltersCard,
+              { position: 'relative', zIndex: 30 },
+              isCompactLayout ? styles.heroPanelCompact : null,
+              isWhDropdownOpen ? styles.filtersCardOpen : null,
+              { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
             ]}>
-            <Text style={styles.buttonText}>{isParsingFile ? 'Parsing File...' : 'Upload Invoice/Arrival File'}</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={pullSamsaraSnapshot}
-            disabled={isSamsaraLoading}
-            style={[
-              styles.button,
-              styles.buttonSecondary,
-              { backgroundColor: theme.inputBg, borderColor: theme.inputBorder },
-              isSamsaraLoading ? styles.buttonDisabled : null,
-            ]}>
-            <Text style={[styles.buttonSecondaryText, { color: theme.bodyText }]}>
-              {isSamsaraLoading ? 'Loading Samsara...' : 'Pull Samsara Snapshot'}
-            </Text>
-          </Pressable>
-
-          <View style={[styles.progressShell, { borderColor: theme.inputBorder, backgroundColor: theme.inputBg }]}>
-            <View style={styles.progressHeaderRow}>
-              <View style={styles.progressStatusWrap}>
-                <Text style={[styles.progressLabel, { color: theme.bodyText }]}>{parseProgressLabel}</Text>
-              </View>
-              <Text style={[styles.progressPct, { color: theme.mutedText }]}>{Math.round(parseProgressPct)}%</Text>
-            </View>
-            <View style={[styles.progressTrack, { backgroundColor: darkMode ? '#0f172a' : '#dbeafe' }]}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    backgroundColor: theme.accent,
-                    width: `${Math.max(0, Math.min(100, parseProgressPct))}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-        </View>
-
-        <Text style={[styles.helpText, { color: theme.mutedText }]}> 
-          Auto-detected fields should include lat/lng + arrived_lat/arrived_lng. Offender defaults to route when available.
-        </Text>
-        {fileName ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Loaded: {fileName}</Text> : null}
-        {keys.whIdKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>WH_ID column: {keys.whIdKey}</Text> : null}
-        {keys.offenderKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Offender dimension: {keys.offenderKey}</Text> : null}
-        {keys.customerKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Customer dimension: {keys.customerKey}</Text> : null}
-        {keys.invoiceTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Invoice time column: {keys.invoiceTimeKey}</Text> : null}
-        {keys.arrivedTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Arrived time column: {keys.arrivedTimeKey}</Text> : null}
-        {error ? <Text style={[styles.error, { color: theme.errorText }]}>{error}</Text> : null}
-      </View>
-
-      <View
-        style={[
-          styles.card,
-          styles.filtersCard,
-          isWhDropdownOpen ? styles.filtersCardOpen : null,
-          { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
-        ]}> 
-        <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Filters</Text>
-        <View style={styles.filtersGrid}>
-          <View style={styles.thresholdBlock}>
-            <Text style={[styles.label, { color: theme.mutedText }]}>WH_ID filter (web dropdown style)</Text>
-            <View style={styles.dropdownWrap}>
-              <Pressable
-                onPress={() => setIsWhDropdownOpen((open) => !open)}
-                style={[styles.dropdownTrigger, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
-                <Text style={[styles.dropdownTriggerText, { color: theme.bodyText }]}>{selectedWhId}</Text>
-                <Text style={[styles.dropdownChevron, { color: theme.accent }]}>{isWhDropdownOpen ? '▲' : '▼'}</Text>
-              </Pressable>
-              {isWhDropdownOpen ? (
-                <View style={[styles.dropdownMenu, { backgroundColor: theme.cardBg, borderColor: theme.inputBorder }]}> 
-                  {whIdOptions.map((option) => (
-                    <Pressable
-                      key={option}
-                      onPress={() => {
-                        setSelectedWhId(option);
-                        setSelectedOffender(null);
-                        setOffenderPage(1);
-                        setIsWhDropdownOpen(false);
-                      }}
-                      style={[
-                        styles.dropdownItem,
-                        { borderTopColor: theme.cardBorder },
-                        option === selectedWhId ? [styles.dropdownItemSelected, { backgroundColor: theme.selectedRowBg }] : null,
-                      ]}>
-                      <Text
-                        style={[
-                          styles.dropdownItemText,
-                          { color: theme.bodyText },
-                          option === selectedWhId ? [styles.dropdownItemTextSelected, { color: theme.accent }] : null,
-                        ]}>
-                        {option}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          </View>
-
-          <View style={styles.thresholdBlock}>
-            <Text style={[styles.label, { color: theme.mutedText }]}>Route search/filter</Text>
-            <TextInput
-              value={routeSearchQuery}
-              onChangeText={(value) => {
-                setRouteSearchQuery(value);
-                setSelectedOffender(null);
-                setOffenderPage(1);
-              }}
-              placeholder="Search route code (e.g. DCH, CTI)"
-              placeholderTextColor={theme.subtleText}
-              style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
-            />
-          </View>
-
-          <View style={styles.thresholdBlock}>
-            <Text style={[styles.label, { color: theme.mutedText }]}>Mismatch threshold (miles)</Text>
-            <TextInput
-              value={thresholdText}
-              onChangeText={setThresholdText}
-              keyboardType="decimal-pad"
-              style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
-            />
-          </View>
-
-          <View style={styles.thresholdBlock}>
-            <Text style={[styles.label, { color: theme.mutedText }]}>Per-truck lookback window (hours)</Text>
-            <TextInput
-              value={lookbackHoursText}
-              onChangeText={setLookbackHoursText}
-              keyboardType="numeric"
-              style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
-            />
-            <View style={styles.lookbackPresetRow}>
-              {[24, 48, 72].map((hours) => {
-                const isActive = lookbackHours === hours;
-
-                return (
+            <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Filters</Text>
+            <View style={[styles.filtersGrid, isCompactLayout ? styles.filtersGridCompact : null]}>
+              <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>WH_ID filter (web dropdown style)</Text>
+                <View style={styles.dropdownWrap}>
                   <Pressable
-                    key={`lookback-${hours}`}
-                    onPress={() => setLookbackHoursText(String(hours))}
+                    onPress={() => setIsWhDropdownOpen((open) => !open)}
+                    style={[styles.dropdownTrigger, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                    <Text style={[styles.dropdownTriggerText, { color: theme.bodyText }]}>{selectedWhId}</Text>
+                    <Text style={[styles.dropdownChevron, { color: theme.accent }]}>{isWhDropdownOpen ? '▲' : '▼'}</Text>
+                  </Pressable>
+                  {isWhDropdownOpen ? (
+                    <View style={[styles.dropdownMenu, { backgroundColor: theme.cardBg, borderColor: theme.inputBorder }]}>
+                      {whIdOptions.map((option) => (
+                        <Pressable
+                          key={option}
+                          onPress={() => {
+                            setSelectedWhId(option);
+                            setSelectedOffender(null);
+                            setOffenderPage(1);
+                            setIsWhDropdownOpen(false);
+                          }}
+                          style={[
+                            styles.dropdownItem,
+                            { borderTopColor: theme.cardBorder },
+                            option === selectedWhId ? [styles.dropdownItemSelected, { backgroundColor: theme.selectedRowBg }] : null,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.dropdownItemText,
+                              { color: theme.bodyText },
+                              option === selectedWhId ? [styles.dropdownItemTextSelected, { color: theme.accent }] : null,
+                            ]}>
+                            {option}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+
+              <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>Route search/filter</Text>
+                <TextInput
+                  value={routeSearchQuery}
+                  onChangeText={(value) => {
+                    setRouteSearchQuery(value);
+                    setSelectedOffender(null);
+                    setOffenderPage(1);
+                  }}
+                  placeholder="Search route code (e.g. DCH, CTI)"
+                  placeholderTextColor={theme.subtleText}
+                  style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+                />
+              </View>
+
+              <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>Mismatch threshold (miles)</Text>
+                <TextInput
+                  value={thresholdText}
+                  onChangeText={setThresholdText}
+                  keyboardType="decimal-pad"
+                  style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+                />
+              </View>
+
+              <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>Per-truck lookback window (hours)</Text>
+                <TextInput
+                  value={lookbackHoursText}
+                  onChangeText={setLookbackHoursText}
+                  keyboardType="numeric"
+                  style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+                />
+                <View style={styles.lookbackPresetRow}>
+                  {[24, 48, 72].map((hours) => {
+                    const isActive = lookbackHours === hours;
+
+                    return (
+                      <Pressable
+                        key={`lookback-${hours}`}
+                        onPress={() => setLookbackHoursText(String(hours))}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: isActive ? theme.accent : theme.inputBg,
+                            borderColor: isActive ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{hours}h</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
+
+            <Text style={[styles.helpText, { color: theme.mutedText }]}>Rolling window: last {lookbackHours}h per offender/truck, anchored to the latest timestamp for each route.</Text>
+            {pointsWithTimestampCount === 0 ? (
+              <Text style={[styles.helpText, { color: theme.mutedText }]}>No parseable invoice/arrived timestamps detected yet, so all points are currently included.</Text>
+            ) : null}
+            {pointsWithTimestampCount > 0 && timeFilteredOutCount > 0 ? (
+              <Text style={[styles.helpText, { color: theme.mutedText }]}>Filtered out {timeFilteredOutCount} older point(s) outside the active per-truck window.</Text>
+            ) : null}
+          </View>
+
+          <View
+            style={[
+              styles.card,
+              styles.heroUploadCard,
+              isCompactLayout ? styles.heroPanelCompact : null,
+              { backgroundColor: theme.cardBg, borderColor: theme.cardBorder },
+            ]}>
+            <View style={[styles.controls, isCompactLayout ? styles.controlsCompact : null]}>
+              <Pressable
+                onPress={pickDataFile}
+                disabled={isParsingFile}
+                style={[
+                  styles.button,
+                  { backgroundColor: theme.accent },
+                  isParsingFile ? styles.buttonDisabled : null,
+                ]}>
+                <Text style={styles.buttonText}>{isParsingFile ? 'Parsing File...' : 'Upload Invoice/Arrival File'}</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={loadSamsaraTripHistory}
+                disabled={isTripLoading || !activeOffenderSummary}
+                style={[
+                  styles.button,
+                  { borderWidth: 1 },
+                  { backgroundColor: theme.inputBg, borderColor: theme.inputBorder },
+                  isTripLoading || !activeOffenderSummary ? styles.buttonDisabled : null,
+                ]}>
+                <Text style={[styles.buttonSecondaryText, { color: theme.bodyText }]}>
+                  {isTripLoading ? 'Loading trip history...' : 'Load Samsara Trip History'}
+                </Text>
+              </Pressable>
+
+              <View style={[styles.progressShell, isCompactLayout ? styles.progressShellCompact : null, { borderColor: theme.inputBorder, backgroundColor: theme.inputBg }]}>
+                <View style={styles.progressHeaderRow}>
+                  <View style={styles.progressStatusWrap}>
+                    <Text style={[styles.progressLabel, { color: theme.bodyText }]}>{parseProgressLabel}</Text>
+                  </View>
+                  <Text style={[styles.progressPct, { color: theme.mutedText }]}>{Math.round(parseProgressPct)}%</Text>
+                </View>
+                <View style={[styles.progressTrack, { backgroundColor: darkMode ? '#0f172a' : '#dbeafe' }]}>
+                  <View
                     style={[
-                      styles.lookbackPresetButton,
+                      styles.progressFill,
                       {
-                        backgroundColor: isActive ? theme.accent : theme.inputBg,
-                        borderColor: isActive ? theme.accent : theme.inputBorder,
+                        backgroundColor: theme.accent,
+                        width: `${Math.max(0, Math.min(100, parseProgressPct))}%`,
                       },
                     ]}
-                  >
-                    <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{hours}h</Text>
-                  </Pressable>
-                );
-              })}
+                  />
+                </View>
+              </View>
             </View>
+
+            <Text style={[styles.helpText, { color: theme.mutedText }]}> 
+              Auto-detected fields should include lat/lng + arrived_lat/arrived_lng. Offender defaults to route when available.
+            </Text>
+            {fileName ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Loaded: {fileName}</Text> : null}
+            {keys.whIdKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>WH_ID column: {keys.whIdKey}</Text> : null}
+            {keys.offenderKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Offender dimension: {keys.offenderKey}</Text> : null}
+            {keys.customerKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Customer dimension: {keys.customerKey}</Text> : null}
+            {keys.invoiceTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Invoice time column: {keys.invoiceTimeKey}</Text> : null}
+            {keys.arrivedTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Arrived time column: {keys.arrivedTimeKey}</Text> : null}
+            {error ? <Text style={[styles.error, { color: theme.errorText }]}>{error}</Text> : null}
           </View>
         </View>
-        <Text style={[styles.helpText, { color: theme.mutedText }]}>Rolling window: last {lookbackHours}h per offender/truck, anchored to each offender's latest timestamp.</Text>
-        {pointsWithTimestampCount === 0 ? (
-          <Text style={[styles.helpText, { color: theme.mutedText }]}>No parseable invoice/arrived timestamps detected yet, so all points are currently included.</Text>
-        ) : null}
-        {pointsWithTimestampCount > 0 && timeFilteredOutCount > 0 ? (
-          <Text style={[styles.helpText, { color: theme.mutedText }]}>Filtered out {timeFilteredOutCount} older point(s) outside the active per-truck window.</Text>
-        ) : null}
       </View>
 
       <View style={styles.metricsRow}>
@@ -2059,6 +2323,13 @@ export default function ImpactScreen() {
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
             <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected Offender</Text>
             <Text style={[styles.offenderHeadline, { color: theme.bodyText }]}>{activeOffenderSummary.offender}</Text>
+            {activeTruckName ? (
+              <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>Truck column: {activeTruckName}</Text>
+            ) : activeTruckId ? (
+              <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>Truck number: {activeTruckId}</Text>
+            ) : (
+              <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No truck column was detected for this route, so Samsara lookup will fall back to the route label.</Text>
+            )}
             <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>
               {activeOffenderSummary.overThresholdCount} of {activeOffenderSummary.invoiceCount} invoices are over {thresholdMiles} mile(s) ({formatPct(activeOffenderSummary.overThresholdRate)}).
             </Text>
@@ -2077,6 +2348,7 @@ export default function ImpactScreen() {
                 Current highest offender at this threshold: {topOffender.offender}
               </Text>
             ) : null}
+            <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Use the button above to load trip history for this truck number on the selected route.</Text>
             {activeRouteMapUrl ? (
               <Pressable onPress={openActiveRouteMap} style={[styles.routeMapButton, { backgroundColor: theme.accent }]}>
                 <Text style={styles.routeMapButtonText}>Open In-Route Map</Text>
@@ -2096,9 +2368,125 @@ export default function ImpactScreen() {
               activeOffender={activeOffenderSummary.offender}
               routeMapUrl={activeRouteMapUrl}
               compareSummary={compareSummary}
+              tripHistoryPoints={samsaraTripPoints}
+              showTripHistory={isTripOverlayVisible}
               selectedPointId={selectedStop ? pointSelectionKey(selectedStop) : null}
               onPointSelect={(pointId) => setSelectedStopId(pointId)}
             />
+          </View>
+
+          <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}> 
+            <View style={styles.sectionHeaderRow}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Samsara Trip History</Text>
+                <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+                  Route-aware trip information for the selected truck number, pulled from the Samsara history endpoint.
+                </Text>
+              </View>
+              <View style={styles.tripHistoryActions}>
+                <View style={[styles.scorePill, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                  <Text style={[styles.scorePillLabel, { color: theme.mutedText }]}>Status</Text>
+                  <Text style={[styles.scorePillValue, { color: theme.bodyText }]}>{isTripLoading ? 'Loading' : samsaraTripInfo ? 'Ready' : 'Idle'}</Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsTripOverlayVisible((value) => !value)}
+                  disabled={!samsaraTripInfo}
+                  style={[
+                    styles.tripOverlayToggle,
+                    { backgroundColor: isTripOverlayVisible ? theme.accent : theme.inputBg, borderColor: theme.inputBorder },
+                    !samsaraTripInfo ? styles.buttonDisabled : null,
+                  ]}>
+                  <Text style={[styles.tripOverlayToggleText, { color: isTripOverlayVisible ? '#ffffff' : theme.bodyText }]}>
+                    {isTripOverlayVisible ? 'Hide trip overlay' : 'Show trip overlay'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setIsTripDrawerOpen((value) => !value)}
+                  disabled={!samsaraTripInfo}
+                  style={[
+                    styles.tripOverlayToggle,
+                    { backgroundColor: isTripDrawerOpen ? theme.accentSoft : theme.inputBg, borderColor: theme.inputBorder },
+                    !samsaraTripInfo ? styles.buttonDisabled : null,
+                  ]}>
+                  <Text style={[styles.tripOverlayToggleText, { color: theme.bodyText }]}>
+                    {isTripDrawerOpen ? 'Hide trip history' : 'Show trip history'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            {isTripDrawerOpen ? (samsaraTripInfo ? (
+              <>
+                <View style={styles.summaryMetricGrid}>
+                  <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                    <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Truck / vehicle</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]} numberOfLines={2}>{samsaraTripInfo.vehicleName}</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>ID {samsaraTripInfo.vehicleId}</Text>
+                  </View>
+                  <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                    <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Window</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{formatDisplayDateLabel(samsaraTripInfo.dateLabel)}</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>{formatEasternDateTime(new Date(samsaraTripInfo.startTime).getTime())} to {formatEasternDateTime(new Date(samsaraTripInfo.endTime).getTime())}</Text>
+                  </View>
+                  <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                    <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Distance</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{samsaraTripInfo.totalDistanceMiles.toFixed(1)} mi</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>{Math.round(samsaraTripInfo.totalDurationMinutes)} min across {samsaraTripInfo.pointCount} GPS points</Text>
+                  </View>
+                  <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                    <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Segments</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{samsaraTripInfo.segmentCount}</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Grouped by trip gaps and movement changes</Text>
+                  </View>
+                </View>
+
+                <View style={styles.tripSegmentList}>
+                  {pagedTripSegments.length > 0 ? pagedTripSegments.map((segment) => (
+                    <View key={`trip-segment-${segment.index}`} style={[styles.tripSegmentCard, { backgroundColor: theme.inputBg, borderColor: theme.cardBorder }]}>
+                      <View style={styles.tripSegmentHeader}>
+                        <Text style={[styles.tripSegmentTitle, { color: theme.bodyText }]}>Trip segment {segment.index}</Text>
+                        <Text style={[styles.tripSegmentMeta, { color: theme.mutedText }]}>{segment.distanceMiles.toFixed(1)} mi | {Math.max(0, Math.round(segment.durationMinutes))} min | max {Math.round(segment.maxSpeedMph)} mph</Text>
+                      </View>
+                      <Text style={[styles.tripSegmentMeta, { color: theme.mutedText }]} numberOfLines={2}>
+                        {segment.startLabel} to {segment.endLabel}
+                      </Text>
+                      <Text style={[styles.tripSegmentMeta, { color: theme.subtleText }]} numberOfLines={2}>
+                        Start {segment.startLat.toFixed(5)}, {segment.startLng.toFixed(5)} | End {segment.endLat.toFixed(5)}, {segment.endLng.toFixed(5)}
+                      </Text>
+                    </View>
+                  )) : (
+                    <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Trip history loaded, but no multi-point segments were detected in the selected window.</Text>
+                  )}
+                </View>
+                {samsaraTripInfo.segments.length > 10 ? (
+                  <View style={styles.paginationRow}>
+                    <Pressable
+                      onPress={() => setTripPage((current) => Math.max(1, current - 1))}
+                      disabled={visibleTripPage <= 1}
+                      style={[
+                        styles.paginationButton,
+                        { backgroundColor: theme.accent },
+                        visibleTripPage <= 1 ? styles.paginationButtonDisabled : null,
+                      ]}>
+                      <Text style={styles.paginationButtonText}>Previous</Text>
+                    </Pressable>
+                    <Text style={[styles.paginationText, { color: theme.mutedText }]}>Page {visibleTripPage} of {totalTripPages} | Showing {tripPageStartCount}-{tripPageEndCount} of {samsaraTripInfo.segments.length}</Text>
+                    <Pressable
+                      onPress={() => setTripPage((current) => Math.min(totalTripPages, current + 1))}
+                      disabled={visibleTripPage >= totalTripPages}
+                      style={[
+                        styles.paginationButton,
+                        { backgroundColor: theme.accent },
+                        visibleTripPage >= totalTripPages ? styles.paginationButtonDisabled : null,
+                      ]}>
+                      <Text style={styles.paginationButtonText}>Next</Text>
+                    </Pressable>
+                  </View>
+                ) : null}
+              </>
+            ) : (
+              <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Click the Load Samsara Trip History button to resolve this truck number and fetch its route-day GPS trail.</Text>
+            )) : null}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -2107,12 +2495,26 @@ export default function ImpactScreen() {
                 <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Stop Table + Detail Drawer</Text>
                 <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>Click a row or a map point to lock the same stop into the detail view.</Text>
               </View>
-              <View style={[styles.scorePill, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
-                <Text style={[styles.scorePillLabel, { color: theme.mutedText }]}>Route risk</Text>
-                <Text style={[styles.scorePillValue, { color: theme.bodyText }]}>{compareSummary?.riskScore.toFixed(1) ?? 'N/A'}</Text>
+              <View style={styles.tripHistoryActions}>
+                <View style={[styles.scorePill, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                  <Text style={[styles.scorePillLabel, { color: theme.mutedText }]}>Route risk</Text>
+                  <Text style={[styles.scorePillValue, { color: theme.bodyText }]}>{compareSummary?.riskScore.toFixed(1) ?? 'N/A'}</Text>
+                </View>
+                <Pressable
+                  onPress={() => setIsStopDrawerOpen((value) => !value)}
+                  style={[
+                    styles.tripOverlayToggle,
+                    { backgroundColor: isStopDrawerOpen ? theme.accent : theme.inputBg, borderColor: theme.inputBorder },
+                  ]}>
+                  <Text style={[styles.tripOverlayToggleText, { color: isStopDrawerOpen ? '#ffffff' : theme.bodyText }]}>
+                    {isStopDrawerOpen ? 'Hide stop table' : 'Show stop table'}
+                  </Text>
+                </Pressable>
               </View>
             </View>
 
+            {isStopDrawerOpen ? (
+              <>
             <View style={styles.stopToolbar}>
               <View style={styles.stopSearchWrap}>
                 <Text style={[styles.label, { color: theme.mutedText }]}>Search stops</Text>
@@ -2277,6 +2679,10 @@ export default function ImpactScreen() {
                 </View>
               )}
             </ScrollView>
+              </>
+            ) : (
+              <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Open the stop table to browse stops and keep the detail drawer in sync with the map.</Text>
+            )}
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
@@ -2360,8 +2766,8 @@ const styles = StyleSheet.create({
   },
   hero: {
     borderRadius: 18,
-    padding: 18,
-    gap: 8,
+    padding: 14,
+    gap: 6,
   },
   heroHeader: {
     flexDirection: 'row',
@@ -2379,70 +2785,109 @@ const styles = StyleSheet.create({
   },
   title: {
     color: '#ffffff',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '800',
   },
   subtitle: {
     color: '#dbeafe',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
   },
   card: {
     borderRadius: 18,
     borderWidth: 1,
     borderColor: '#dbe3ef',
     backgroundColor: '#ffffff',
-    padding: 14,
-    gap: 8,
+    padding: 12,
+    gap: 6,
+  },
+  heroActionsRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    gap: 12,
+    alignItems: 'stretch',
+  },
+  heroActionsRowCompact: {
+    flexDirection: 'column',
+  },
+  heroPanelCompact: {
+    width: '100%',
+  },
+  heroFiltersCard: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
+  heroUploadCard: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: 360,
+    width: 360,
+    maxWidth: 360,
   },
   controls: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
     alignItems: 'center',
   },
   filtersGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
+    gap: 10,
     alignItems: 'flex-start',
   },
   filtersCard: {
     position: 'relative',
     zIndex: 30,
   },
+  filtersGridCompact: {
+    flexDirection: 'column',
+    gap: 5,
+  },
+  filtersCardCompact: {
+    padding: 10,
+  },
   filtersCardOpen: {
-    zIndex: 60,
+    zIndex: 200,
+    elevation: 20,
   },
   button: {
     borderRadius: 12,
     backgroundColor: '#1d4ed8',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
   },
   buttonSecondary: {
     borderWidth: 1,
   },
-  buttonDisabled: {
-    opacity: 0.7,
+  controlsCompact: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 5,
   },
   buttonText: {
     color: '#ffffff',
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
   buttonSecondaryText: {
     fontWeight: '700',
-    fontSize: 13,
+    fontSize: 12,
   },
   progressShell: {
-    minWidth: 220,
+    minWidth: 200,
     flexGrow: 1,
     borderWidth: 1,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+    gap: 5,
   },
   progressHeaderRow: {
     flexDirection: 'row',
@@ -2454,12 +2899,12 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   progressLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     flexShrink: 1,
   },
   progressPct: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   progressTrack: {
@@ -2472,20 +2917,28 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   thresholdBlock: {
-    minWidth: 220,
+    minWidth: 190,
     gap: 4,
   },
+  thresholdBlockCompact: {
+    minWidth: 0,
+    width: '100%',
+  },
+  progressShellCompact: {
+    minWidth: 0,
+    width: '100%',
+  },
   lookbackPresetRow: {
-    marginTop: 4,
+    marginTop: 3,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
   },
   lookbackPresetButton: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
   },
   lookbackPresetButtonText: {
     fontSize: 12,
@@ -2493,15 +2946,16 @@ const styles = StyleSheet.create({
   },
   dropdownWrap: {
     position: 'relative',
-    zIndex: 80,
+    zIndex: 220,
+    elevation: 20,
   },
   dropdownTrigger: {
     borderWidth: 1,
     borderColor: '#bfdbfe',
     borderRadius: 10,
     backgroundColor: '#eff6ff',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -2518,21 +2972,20 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   dropdownMenu: {
-    position: 'absolute',
-    top: 44,
-    left: 0,
-    right: 0,
-    zIndex: 90,
+    position: 'relative',
+    marginTop: 6,
+    zIndex: 240,
+    elevation: 30,
     borderWidth: 1,
     borderColor: '#bfdbfe',
     borderRadius: 10,
     backgroundColor: '#ffffff',
-    maxHeight: 180,
+    maxHeight: 170,
     overflow: 'hidden',
   },
   dropdownItem: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
     borderTopWidth: 1,
     borderTopColor: '#e2e8f0',
   },
@@ -2549,7 +3002,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: '#334155',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   thresholdInput: {
@@ -2558,9 +3011,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: '#eff6ff',
     color: '#0f172a',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 14,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    fontSize: 13,
   },
   helpText: {
     color: '#334155',
@@ -2723,6 +3176,20 @@ const styles = StyleSheet.create({
   scorePillValue: {
     fontSize: 18,
     fontWeight: '900',
+  },
+  tripHistoryActions: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  tripOverlayToggle: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  tripOverlayToggleText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   stopToolbar: {
     flexDirection: 'row',
@@ -3062,9 +3529,42 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     gap: 2,
   },
+  summaryMetricLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
   summaryMetricValue: {
     fontSize: 18,
     fontWeight: '900',
+  },
+  summaryMetricSub: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  tripSegmentList: {
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  tripSegmentCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  tripSegmentHeader: {
+    gap: 2,
+  },
+  tripSegmentTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  tripSegmentMeta: {
+    fontSize: 11,
+    lineHeight: 16,
   },
   summaryExportButton: {
     marginTop: 6,
@@ -3079,3 +3579,4 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 });
+

@@ -21,9 +21,18 @@ type DiscrepancyPoint = {
   timeDeltaMinutes: number | null;
 };
 
+type TripHistoryPoint = {
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour?: number;
+};
+
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
+  tripHistoryPoints?: TripHistoryPoint[];
+  showTripHistory?: boolean;
   routeMapUrl?: string | null;
   compareSummary?: {
     date: string | null;
@@ -79,20 +88,7 @@ function formatEasternDateTime(ms: number): string {
   }).format(new Date(ms));
 }
 
-function formatWallClockFromSerial(ms: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  }).format(new Date(ms));
-}
-
-export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
+export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoints = [], showTripHistory = true, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -129,7 +125,13 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         layerRef.current = L.layerGroup().addTo(mapRef.current);
       }
 
-      if (points.length === 0) {
+      const tripLatLngs: [number, number][] = showTripHistory
+        ? tripHistoryPoints
+        .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude))
+        .map((point) => [point.latitude, point.longitude])
+        : [];
+
+      if (points.length === 0 && tripLatLngs.length === 0) {
         mapRef.current.setView(DEFAULT_CENTER, 9);
         mapRef.current.invalidateSize();
         return;
@@ -141,6 +143,47 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
 
       if (selectedPoint) {
         selectedBounds = L.latLngBounds([]);
+      }
+
+      if (tripLatLngs.length > 0) {
+        const tripLine = L.polyline(tripLatLngs, {
+          color: '#1d4ed8',
+          weight: 5,
+          opacity: 0.72,
+          lineCap: 'round',
+          lineJoin: 'round',
+        }).addTo(layerRef.current);
+
+        tripLine.bindTooltip('Samsara trip history', { permanent: false });
+
+        const startPoint = tripLatLngs[0];
+        const endPoint = tripLatLngs[tripLatLngs.length - 1];
+
+        L.circleMarker(startPoint, {
+          radius: 7,
+          color: '#1d4ed8',
+          fillColor: '#60a5fa',
+          fillOpacity: 1,
+          weight: 2,
+        })
+          .bindTooltip('Trip start', { permanent: false })
+          .bindPopup(`<strong>Samsara trip start</strong><br/>${formatEasternDateTime(Date.parse(tripHistoryPoints[0].time))}`)
+          .addTo(layerRef.current);
+
+        L.circleMarker(endPoint, {
+          radius: 7,
+          color: '#7c3aed',
+          fillColor: '#c084fc',
+          fillOpacity: 1,
+          weight: 2,
+        })
+          .bindTooltip('Trip end', { permanent: false })
+          .bindPopup(`<strong>Samsara trip end</strong><br/>${formatEasternDateTime(Date.parse(tripHistoryPoints[tripHistoryPoints.length - 1].time))}`)
+          .addTo(layerRef.current);
+
+        for (const tripPoint of tripLatLngs) {
+          overviewBounds.extend(tripPoint);
+        }
       }
 
       for (const point of points) {
@@ -200,7 +243,7 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         }
       }
 
-      if (selectedBounds && selectedPoint) {
+      if (selectedBounds && selectedPoint && tripLatLngs.length === 0) {
         mapRef.current.flyToBounds(selectedBounds, {
           padding: [80, 80],
           maxZoom: 15,
@@ -220,7 +263,7 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
     return () => {
       disposed = true;
     };
-  }, [activeOffender, points, selectedPointId]);
+  }, [activeOffender, onPointSelect, points, selectedPointId, showTripHistory, tripHistoryPoints]);
 
   return (
     <View style={styles.shell}>
@@ -298,6 +341,8 @@ export default function DiscrepancyMap({ points, activeOffender, routeMapUrl, co
         <Text style={styles.legendItem}>Blue dot invoice</Text>
         <Text style={styles.legendItem}>Orange dot arrived</Text>
         <Text style={styles.legendItem}>Redder line bigger mismatch</Text>
+        <Text style={styles.legendItem}>Blue line Samsara trip</Text>
+        <Text style={styles.legendItem}>Purple dot trip end</Text>
       </View>
     </View>
   );

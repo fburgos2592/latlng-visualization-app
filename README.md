@@ -28,6 +28,8 @@ The Impact tab is designed for operational triage:
 - Export daily summary, follow-up queue, and top outlier stops to Excel.
 - Filter by warehouse (`wh_id`), route/offender search, mismatch threshold, and stop search.
 - Compare a mismatch map with the actual in-route route page side by side.
+- Load Samsara trip history for the selected truck and overlay the trip path on the mismatch map.
+- Toggle the Samsara overlay on and off when you want to focus on mismatch geometry.
 - Drill into a stop table with customer, invoice, arrival, coordinates, time delta, and a route risk score.
 - Step through stops with playback and keep the map selection synchronized with the table.
 - Show timeline fields in ops-first order: arrived first, invoice second.
@@ -187,6 +189,12 @@ Optional future data source:
 
 ## Recent Web Updates
 
+- Impact hero was compacted to keep Filters and Upload actions in the same header row on desktop.
+- The WH_ID dropdown behavior was adjusted to avoid overlaying the Upload panel.
+- Impact layout now initializes from the real browser width on web, so first load matches post-resize layout behavior.
+- Samsara trip history now renders below the map, with 10-row paging controls for faster review.
+- Trip history and stop detail sections include right-side drawer toggles for cleaner map-first workflows.
+- Impact light mode palette was aligned with the Home tab (lighter surfaces, neutral borders, teal accents).
 - Bottom tab navigation was tuned for Windows/Edge viewport behavior.
 - Home, Explore, and Impact labels are restored and visible on web.
 - Web tab icons use explicit Material icon names for reliable rendering.
@@ -195,6 +203,8 @@ Optional future data source:
 - Timestamp display was hardened so map and table use the same formatted values.
 - Impact now includes a daily summary section, a matching side follow-up drawer, and one-click Excel export.
 - Impact analysis now supports a rolling per-truck/per-route lookback window (default 48h) so recent behavior can be analyzed without a day-behind lag.
+- Impact now resolves Samsara trips from the parsed truck column, overlays the trip path on the mismatch map, and adds a toggle for hiding/showing that overlay.
+- The map legend now calls out the Samsara trip line and trip end marker.
 - Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
 - Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.
