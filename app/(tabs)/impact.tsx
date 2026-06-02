@@ -97,6 +97,19 @@ type DatasetSnapshot = {
   avgAbsTimeDeltaMinutes: number;
 };
 
+type CoordinatePair = {
+  lat: number;
+  lng: number;
+  swapped: boolean;
+  scaled: boolean;
+};
+
+type CoordinateQuality = {
+  excludedRows: number;
+  swappedPairs: number;
+  scaledPairs: number;
+};
+
 const INVOICE_LAT_ALIASES = ['lat', 'invoice_lat', 'invoice_latitude'];
 const INVOICE_LNG_ALIASES = ['lng', 'lon', 'long', 'invoice_lng', 'invoice_longitude'];
 const ARRIVED_LAT_ALIASES = ['arrived_lat', 'arrival_lat', 'arrive_lat'];
@@ -163,6 +176,63 @@ function normalizeKey(value: string): string {
 function toNumber(value: unknown): number | null {
   const parsed = Number(String(value ?? '').trim());
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isValidLatLng(lat: number, lng: number): boolean {
+  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+}
+
+function normalizeCoordinatePair(latValue: unknown, lngValue: unknown): CoordinatePair | null {
+  const lat = toNumber(latValue);
+  const lng = toNumber(lngValue);
+
+  if (lat == null || lng == null) {
+    return null;
+  }
+
+  if (isValidLatLng(lat, lng)) {
+    return {
+      lat,
+      lng,
+      swapped: false,
+      scaled: false,
+    };
+  }
+
+  if (Math.abs(lat) <= 180 && Math.abs(lng) <= 90 && isValidLatLng(lng, lat)) {
+    return {
+      lat: lng,
+      lng: lat,
+      swapped: true,
+      scaled: false,
+    };
+  }
+
+  const divisors = [100000, 1000000, 10000000];
+  for (const divisor of divisors) {
+    const scaledLat = lat / divisor;
+    const scaledLng = lng / divisor;
+
+    if (isValidLatLng(scaledLat, scaledLng)) {
+      return {
+        lat: scaledLat,
+        lng: scaledLng,
+        swapped: false,
+        scaled: true,
+      };
+    }
+
+    if (Math.abs(scaledLat) <= 180 && Math.abs(scaledLng) <= 90 && isValidLatLng(scaledLng, scaledLat)) {
+      return {
+        lat: scaledLng,
+        lng: scaledLat,
+        swapped: true,
+        scaled: true,
+      };
+    }
+  }
+
+  return null;
 }
 
 function pickExactKey(keys: string[], aliases: string[]): string | null {
@@ -614,66 +684,95 @@ export default function ImpactScreen() {
 
   const keys = useMemo(() => detectKeys(rows), [rows]);
 
-  const points = useMemo(() => {
-    return rows
-      .map((row, rowIndex) => {
-        const invoiceLat = toNumber(getField(row, keys.invoiceLatKey));
-        const invoiceLng = toNumber(getField(row, keys.invoiceLngKey));
-        const arrivedLat = toNumber(getField(row, keys.arrivedLatKey));
-        const arrivedLng = toNumber(getField(row, keys.arrivedLngKey));
+  const parsedPoints = useMemo(() => {
+    const initialQuality: CoordinateQuality = {
+      excludedRows: 0,
+      swappedPairs: 0,
+      scaledPairs: 0,
+    };
 
-        if (invoiceLat == null || invoiceLng == null || arrivedLat == null || arrivedLng == null) {
-          return null;
-        }
+    const result = rows.reduce<{ points: DiscrepancyPoint[]; quality: CoordinateQuality }>((acc, row, rowIndex) => {
+      const invoicePair = normalizeCoordinatePair(
+        getField(row, keys.invoiceLatKey),
+        getField(row, keys.invoiceLngKey)
+      );
+      const arrivedPair = normalizeCoordinatePair(
+        getField(row, keys.arrivedLatKey),
+        getField(row, keys.arrivedLngKey)
+      );
 
-        const distanceMiles = haversineMiles(invoiceLat, invoiceLng, arrivedLat, arrivedLng);
-        const whIdRaw = getField(row, keys.whIdKey);
-        const whId = String(whIdRaw ?? '').trim() || 'Unknown WH';
-        const offenderRaw = getField(row, keys.offenderKey);
-        const offender = String(offenderRaw ?? '').trim() || 'Unknown';
-        const invoiceRaw = getField(row, keys.invoiceIdKey);
-        const invoiceId = String(invoiceRaw ?? '').trim() || `row-${rowIndex + 1}`;
-        const customerRaw = getField(row, keys.customerKey);
-        const customerName = String(customerRaw ?? '').trim() || null;
-        const invoiceTimeRaw = getField(row, keys.invoiceTimeKey);
-        const arrivedTimeRaw = getField(row, keys.arrivedTimeKey);
-        const invoiceTimeLabel = String(invoiceTimeRaw ?? '').trim() || null;
-        const arrivedTimeLabel = String(arrivedTimeRaw ?? '').trim() || null;
-        const invoiceTimeMs = parseTimeValue(invoiceTimeRaw);
-        const arrivedTimeMs = parseTimeValue(arrivedTimeRaw);
-        const invoiceTimeDisplay = formatDateTimeLabel(invoiceTimeLabel, invoiceTimeMs);
-        const arrivedTimeDisplay = formatDateTimeLabel(arrivedTimeLabel, arrivedTimeMs);
-        const timeDeltaMinutes = invoiceTimeMs != null && arrivedTimeMs != null
-          ? (arrivedTimeMs - invoiceTimeMs) / 60_000
-          : null;
-        const dateBValue = getSecondColumnValue(row);
-        const dateRaw = getField(row, keys.dateKey);
-        const dateLabel = normalizeRouteDate(dateBValue) ?? normalizeRouteDate(dateRaw);
+      if (!invoicePair || !arrivedPair) {
+        acc.quality.excludedRows += 1;
+        return acc;
+      }
 
-        return {
-          id: String(rowIndex),
-          rowIndex,
-          invoiceLat,
-          invoiceLng,
-          arrivedLat,
-          arrivedLng,
-          distanceMiles,
-          offender,
-          whId,
-          invoiceId,
-          customerName,
-          invoiceTimeLabel,
-          arrivedTimeLabel,
-          invoiceTimeDisplay,
-          arrivedTimeDisplay,
-          invoiceTimeMs,
-          arrivedTimeMs,
-          timeDeltaMinutes,
-          dateLabel,
-        } satisfies DiscrepancyPoint;
-      })
-      .filter((point): point is DiscrepancyPoint => point !== null);
+      if (invoicePair.swapped) {
+        acc.quality.swappedPairs += 1;
+      }
+      if (arrivedPair.swapped) {
+        acc.quality.swappedPairs += 1;
+      }
+      if (invoicePair.scaled) {
+        acc.quality.scaledPairs += 1;
+      }
+      if (arrivedPair.scaled) {
+        acc.quality.scaledPairs += 1;
+      }
+
+      const distanceMiles = haversineMiles(invoicePair.lat, invoicePair.lng, arrivedPair.lat, arrivedPair.lng);
+      const whIdRaw = getField(row, keys.whIdKey);
+      const whId = String(whIdRaw ?? '').trim() || 'Unknown WH';
+      const offenderRaw = getField(row, keys.offenderKey);
+      const offender = String(offenderRaw ?? '').trim() || 'Unknown';
+      const invoiceRaw = getField(row, keys.invoiceIdKey);
+      const invoiceId = String(invoiceRaw ?? '').trim() || `row-${rowIndex + 1}`;
+      const customerRaw = getField(row, keys.customerKey);
+      const customerName = String(customerRaw ?? '').trim() || null;
+      const invoiceTimeRaw = getField(row, keys.invoiceTimeKey);
+      const arrivedTimeRaw = getField(row, keys.arrivedTimeKey);
+      const invoiceTimeLabel = String(invoiceTimeRaw ?? '').trim() || null;
+      const arrivedTimeLabel = String(arrivedTimeRaw ?? '').trim() || null;
+      const invoiceTimeMs = parseTimeValue(invoiceTimeRaw);
+      const arrivedTimeMs = parseTimeValue(arrivedTimeRaw);
+      const invoiceTimeDisplay = formatDateTimeLabel(invoiceTimeLabel, invoiceTimeMs);
+      const arrivedTimeDisplay = formatDateTimeLabel(arrivedTimeLabel, arrivedTimeMs);
+      const timeDeltaMinutes = invoiceTimeMs != null && arrivedTimeMs != null
+        ? (arrivedTimeMs - invoiceTimeMs) / 60_000
+        : null;
+      const dateBValue = getSecondColumnValue(row);
+      const dateRaw = getField(row, keys.dateKey);
+      const dateLabel = normalizeRouteDate(dateBValue) ?? normalizeRouteDate(dateRaw);
+
+      acc.points.push({
+        id: String(rowIndex),
+        rowIndex,
+        invoiceLat: invoicePair.lat,
+        invoiceLng: invoicePair.lng,
+        arrivedLat: arrivedPair.lat,
+        arrivedLng: arrivedPair.lng,
+        distanceMiles,
+        offender,
+        whId,
+        invoiceId,
+        customerName,
+        invoiceTimeLabel,
+        arrivedTimeLabel,
+        invoiceTimeDisplay,
+        arrivedTimeDisplay,
+        invoiceTimeMs,
+        arrivedTimeMs,
+        timeDeltaMinutes,
+        dateLabel,
+      });
+
+      return acc;
+    }, { points: [], quality: initialQuality });
+
+    return result;
   }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.whIdKey, rows]);
+
+  const points = parsedPoints.points;
+  const coordinateQuality = parsedPoints.quality;
 
   const whIdOptions = useMemo(() => {
     const uniqueWhIds = Array.from(new Set(points.map((point) => point.whId))).sort((left, right) => left.localeCompare(right));
@@ -1309,7 +1408,17 @@ export default function ImpactScreen() {
           <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Over {thresholdMiles} mi</Text>
           <Text style={[styles.metricValue, { color: theme.metricValue }]}>{globalOverThreshold}</Text>
         </View>
+        <View style={[styles.metricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+          <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Excluded Invalid Coord Rows</Text>
+          <Text style={[styles.metricValue, { color: theme.metricValue }]}>{coordinateQuality.excludedRows}</Text>
+        </View>
       </View>
+
+      {(coordinateQuality.swappedPairs > 0 || coordinateQuality.scaledPairs > 0) ? (
+        <Text style={[styles.helpText, { color: theme.mutedText }]}> 
+          Coordinate cleanup applied: swapped pairs {coordinateQuality.swappedPairs}, scaled pairs {coordinateQuality.scaledPairs}.
+        </Text>
+      ) : null}
 
       {outlierAnalysis.snapshot ? (
         <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
