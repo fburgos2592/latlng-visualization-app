@@ -1,7 +1,7 @@
 import * as DocumentPicker from 'expo-document-picker';
 import Papa from 'papaparse';
-import React, { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
@@ -696,6 +696,9 @@ export default function ImpactScreen() {
   const [rows, setRows] = useState<DataRow[]>([]);
   const [fileName, setFileName] = useState('');
   const [error, setError] = useState('');
+  const [isParsingFile, setIsParsingFile] = useState(false);
+  const [parseProgressPct, setParseProgressPct] = useState(0);
+  const [parseProgressLabel, setParseProgressLabel] = useState('Idle');
   const [thresholdText, setThresholdText] = useState('1');
   const [selectedOffender, setSelectedOffender] = useState<string | null>(null);
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
@@ -709,6 +712,7 @@ export default function ImpactScreen() {
   const [darkMode, setDarkMode] = useState(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
+  const logoSpinValue = useRef(new Animated.Value(0)).current;
 
   const thresholdMiles = useMemo(() => {
     const parsed = Number(thresholdText);
@@ -1346,8 +1350,40 @@ export default function ImpactScreen() {
     };
   }, [filteredPoints, thresholdMiles]);
 
+  useEffect(() => {
+    if (!isParsingFile) {
+      logoSpinValue.stopAnimation();
+      logoSpinValue.setValue(0);
+      return;
+    }
+
+    const animation = Animated.loop(
+      Animated.timing(logoSpinValue, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+      logoSpinValue.setValue(0);
+    };
+  }, [isParsingFile, logoSpinValue]);
+
+  const logoSpin = logoSpinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   async function pickDataFile() {
     setError('');
+    setIsParsingFile(true);
+    setParseProgressPct(8);
+    setParseProgressLabel('Choosing file');
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -1362,18 +1398,39 @@ export default function ImpactScreen() {
       });
 
       if (result.canceled) {
+        setIsParsingFile(false);
+        setParseProgressPct(0);
+        setParseProgressLabel('Idle');
         return;
       }
 
       const asset = result.assets?.[0];
       if (!asset?.uri) {
         setError('Could not read the selected file.');
+        setIsParsingFile(false);
+        setParseProgressPct(0);
+        setParseProgressLabel('Idle');
         return;
       }
 
-      const parsedRows = isSpreadsheetUpload(asset)
-        ? parseWorkbookRows(await readBinaryData(asset))
-        : parseCsvRows(await readCsvText(asset));
+      setParseProgressPct(24);
+      setParseProgressLabel('Reading file');
+
+      let parsedRows: DataRow[];
+      if (isSpreadsheetUpload(asset)) {
+        const binaryData = await readBinaryData(asset);
+        setParseProgressPct(48);
+        setParseProgressLabel('Parsing spreadsheet');
+        parsedRows = parseWorkbookRows(binaryData);
+      } else {
+        const csvText = await readCsvText(asset);
+        setParseProgressPct(48);
+        setParseProgressLabel('Parsing CSV');
+        parsedRows = parseCsvRows(csvText);
+      }
+
+      setParseProgressPct(72);
+      setParseProgressLabel('Detecting columns');
 
       const detected = detectKeys(parsedRows);
 
@@ -1389,15 +1446,28 @@ export default function ImpactScreen() {
         setError(
           'Expected columns like lat/lng and arrived_lat/arrived_lng were not detected. Please include invoice and arrival coordinates.'
         );
+        setIsParsingFile(false);
+        setParseProgressPct(0);
+        setParseProgressLabel('Idle');
         return;
       }
 
+      setParseProgressPct(100);
+      setParseProgressLabel('Ready');
       setError('');
     } catch (caughtError) {
       const message = caughtError instanceof Error ? caughtError.message : 'Unable to open or parse that file.';
       setError(message);
       setRows([]);
       setFileName('');
+      setParseProgressPct(0);
+      setParseProgressLabel('Idle');
+    } finally {
+      setTimeout(() => {
+        setIsParsingFile(false);
+        setParseProgressPct(0);
+        setParseProgressLabel('Idle');
+      }, 500);
     }
   }
 
@@ -1421,9 +1491,52 @@ export default function ImpactScreen() {
 
       <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}> 
         <View style={styles.controls}>
-          <Pressable onPress={pickDataFile} style={[styles.button, { backgroundColor: theme.accent }]}>
-            <Text style={styles.buttonText}>Upload Invoice/Arrival File</Text>
+          <Pressable
+            onPress={pickDataFile}
+            disabled={isParsingFile}
+            style={[
+              styles.button,
+              { backgroundColor: theme.accent },
+              isParsingFile ? styles.buttonDisabled : null,
+            ]}>
+            <Text style={styles.buttonText}>{isParsingFile ? 'Parsing File...' : 'Upload Invoice/Arrival File'}</Text>
           </Pressable>
+
+          <View style={[styles.progressShell, { borderColor: theme.inputBorder, backgroundColor: theme.inputBg }]}>
+            <View style={styles.progressHeaderRow}>
+              <View style={styles.progressStatusWrap}>
+                <View style={[styles.logoSpinnerShell, { borderColor: theme.inputBorder, backgroundColor: theme.cardBg }]}>
+                  <Animated.View
+                    style={[
+                      styles.logoSpinnerRing,
+                      {
+                        borderTopColor: theme.accent,
+                        borderRightColor: theme.accent,
+                        transform: [{ rotate: logoSpin }],
+                      },
+                    ]}
+                  />
+                  <Image
+                    source={require('@/assets/images/baldor-logo.png')}
+                    style={styles.logoSpinnerImage}
+                  />
+                </View>
+                <Text style={[styles.progressLabel, { color: theme.bodyText }]}>{parseProgressLabel}</Text>
+              </View>
+              <Text style={[styles.progressPct, { color: theme.mutedText }]}>{Math.round(parseProgressPct)}%</Text>
+            </View>
+            <View style={[styles.progressTrack, { backgroundColor: darkMode ? '#0f172a' : '#dbeafe' }]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    backgroundColor: theme.accent,
+                    width: `${Math.max(0, Math.min(100, parseProgressPct))}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
         </View>
 
         <Text style={[styles.helpText, { color: theme.mutedText }]}> 
@@ -2099,10 +2212,77 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
+  buttonDisabled: {
+    opacity: 0.7,
+  },
   buttonText: {
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 13,
+  },
+  progressShell: {
+    minWidth: 220,
+    flexGrow: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  progressHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  progressStatusWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 1,
+  },
+  logoSpinnerShell: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  logoSpinnerRing: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: 'transparent',
+    borderTopColor: '#1d4ed8',
+    borderRightColor: '#1d4ed8',
+  },
+  logoSpinnerImage: {
+    width: 26,
+    height: 15,
+    resizeMode: 'contain',
+  },
+  progressLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  progressPct: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    height: 10,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   thresholdBlock: {
     minWidth: 220,
