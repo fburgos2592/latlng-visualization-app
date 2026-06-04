@@ -1673,6 +1673,16 @@ export default function ImpactScreen() {
     return driverUsernames.length === 1 ? driverUsernames[0] : null;
   }, [activeOffenderPoints]);
 
+  const activeWarehouseIds = useMemo(
+    () => Array.from(new Set(activeOffenderPoints.map((point) => point.whId).filter((value): value is string => Boolean(value)))),
+    [activeOffenderPoints]
+  );
+
+  const activeTruckCandidates = useMemo(
+    () => Array.from(new Set(activeOffenderPoints.flatMap((point) => [point.truckName, point.truckId]).filter((value): value is string => Boolean(value?.trim())))),
+    [activeOffenderPoints]
+  );
+
   const samsaraMinSpeedMph = useMemo(() => {
     const parsed = Number(samsaraMinSpeedText);
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
@@ -2378,6 +2388,18 @@ export default function ImpactScreen() {
       const selectedRouteSummary = activeOffenderSummary;
       if (!selectedRouteSummary) {
         throw new Error('Select a route/truck first so I can load trip history for that vehicle.');
+      }
+
+      if (selectedWhId === 'All' && activeWarehouseIds.length > 1) {
+        throw new Error(
+          `This route appears in multiple warehouses (${activeWarehouseIds.join(', ')}). Select a specific WH_ID so the correct truck is resolved.`
+        );
+      }
+
+      if (!activeTruckName && !activeTruckId && activeTruckCandidates.length > 1) {
+        throw new Error(
+          `Multiple trucks are associated with this route (${activeTruckCandidates.slice(0, 4).join(', ')}${activeTruckCandidates.length > 4 ? ', ...' : ''}). Narrow by WH_ID or date/time filters before loading Samsara trip history.`
+        );
       }
 
       const truckLookupLabel = activeTruckName ?? activeTruckId ?? selectedRouteSummary.offender;
@@ -3639,6 +3661,12 @@ export default function ImpactScreen() {
             ) : (
               <Text style={[styles.selectionHint, { color: theme.subtleText }]}>No truck column was detected for this route, so Samsara lookup will fall back to the route label.</Text>
             )}
+            {selectedWhId === 'All' && activeWarehouseIds.length > 1 ? (
+              <Text style={[styles.selectionHint, { color: theme.errorText }]}>This route exists across multiple WH_ID values ({activeWarehouseIds.join(', ')}). Select a WH_ID filter before loading Samsara to avoid wrong-truck matches.</Text>
+            ) : null}
+            {!activeTruckName && !activeTruckId && activeTruckCandidates.length > 1 ? (
+              <Text style={[styles.selectionHint, { color: theme.errorText }]}>Multiple truck candidates detected for this route ({activeTruckCandidates.slice(0, 4).join(', ')}{activeTruckCandidates.length > 4 ? ', ...' : ''}). Narrow WH_ID/date filters to resolve the right truck.</Text>
+            ) : null}
             <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>
               {activeOffenderSummary.overThresholdCount} of {activeOffenderSummary.invoiceCount} invoices are over {thresholdMiles} mile(s) ({formatPct(activeOffenderSummary.overThresholdRate)}).
             </Text>
