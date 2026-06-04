@@ -385,6 +385,15 @@ function normalizeKey(value: string): string {
   return value.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+function normalizeSearchToken(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (/^\d+$/.test(normalized)) {
+    return String(Number(normalized));
+  }
+
+  return normalized;
+}
+
 function toNumber(value: unknown): number | null {
   const raw = String(value ?? '').trim();
   if (!raw) {
@@ -1553,7 +1562,16 @@ export default function ImpactScreen() {
       return whFilteredPoints;
     }
 
-    return whFilteredPoints.filter((point) => point.offender.toLowerCase().includes(normalizedQuery));
+    const normalizedNumericQuery = normalizeSearchToken(normalizedQuery);
+
+    return whFilteredPoints.filter((point) => {
+      const offenderLabel = point.offender.toLowerCase();
+      if (offenderLabel.includes(normalizedQuery)) {
+        return true;
+      }
+
+      return normalizeSearchToken(offenderLabel).includes(normalizedNumericQuery);
+    });
   }, [routeSearchQuery, whFilteredPoints]);
 
   const offenderSummaries = useMemo(() => {
