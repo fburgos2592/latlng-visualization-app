@@ -1043,6 +1043,28 @@ async function fetchSamsaraDriverInfo(proxyBase: string, vehicleId: string | num
   }
 }
 
+async function fetchSamsaraDriverByUsername(proxyBase: string, username: string): Promise<SamsaraDriverInfo | null> {
+  const normalizedUsername = username.trim().toLowerCase();
+  if (!normalizedUsername) {
+    return null;
+  }
+
+  try {
+    const driverParams = new URLSearchParams({ limit: '512' });
+    const driverResponse = await fetch(`${proxyBase}/fleet/drivers?${driverParams.toString()}`);
+    if (!driverResponse.ok) {
+      return null;
+    }
+
+    const driverPayload = await driverResponse.json() as SamsaraDriverListResponse;
+    const drivers = Array.isArray(driverPayload.data) ? driverPayload.data : [];
+    const usernameMatch = drivers.find((entry) => String(entry.username ?? '').trim().toLowerCase() === normalizedUsername);
+    return normalizeDriverRecord(usernameMatch, 'drivers.usernameLookup');
+  } catch {
+    return null;
+  }
+}
+
 export default function ImpactScreen() {
   const windowDimensions = useWindowDimensions();
   const [layoutWidth, setLayoutWidth] = useState(() => {
@@ -1851,22 +1873,26 @@ export default function ImpactScreen() {
           const segments = segmentTripPoints(tripPoints);
           const totalDistanceMiles = segments.reduce((total, segment) => total + segment.distanceMiles, 0);
           const totalDurationMinutes = (new Date(tripPoints[tripPoints.length - 1].time).getTime() - new Date(tripPoints[0].time).getTime()) / 60_000;
-          const driver = await fetchSamsaraDriverInfo(proxyBase, vehicleMatch.id);
+          const assignedDriver = await fetchSamsaraDriverInfo(proxyBase, vehicleMatch.id);
+          let resolvedDriver = assignedDriver;
 
           if (expectedDriverUsername) {
-            if (!driver?.username) {
-              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" is present, but Samsara returned no username for this assigned driver.`);
+            const usernameDriver = await fetchSamsaraDriverByUsername(proxyBase, expectedDriverUsername);
+            if (!usernameDriver?.username) {
+              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" was not found in Samsara driver records.`);
             }
 
-            if (driver.username.trim().toLowerCase() !== expectedDriverUsername.toLowerCase()) {
-              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" does not match Samsara username "${driver.username}".`);
+            resolvedDriver = usernameDriver;
+
+            if (usernameDriver.username.trim().toLowerCase() !== expectedDriverUsername.toLowerCase()) {
+              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" does not match Samsara username "${usernameDriver.username}".`);
             }
           }
 
           setSamsaraTripInfo({
             vehicleId: String(vehicleMatch.id),
             vehicleName: extractVehicleName(vehicleMatch),
-            driver,
+            driver: resolvedDriver,
             routeLabel: selectedRouteSummary.offender,
             dateLabel: dayWindow.dateLabel,
             startTime: tripPoints[0].time,
