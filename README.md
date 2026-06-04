@@ -204,6 +204,8 @@ Optional future data source:
 - Impact now includes a daily summary section, a matching side follow-up drawer, and one-click Excel export.
 - Impact analysis now supports a rolling per-truck/per-route lookback window (default 48h) so recent behavior can be analyzed without a day-behind lag.
 - Impact now resolves Samsara trips from the parsed truck column, overlays the trip path on the mismatch map, and adds a toggle for hiding/showing that overlay.
+- A map-side Samsara Mission Control drawer was added so overlay controls can stay visible while panning/zooming the map.
+- Mission Control inputs now include explicit field labels (speed, idle, gap, harsh, and geofence thresholds) for faster operator reference.
 - The map legend now calls out the Samsara trip line and trip end marker.
 - Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
 - Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
