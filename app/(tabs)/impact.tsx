@@ -17,6 +17,7 @@ type DiscrepancyPoint = {
   arrivedLng: number;
   distanceMiles: number;
   offender: string;
+  driverUsername: string | null;
   truckId: string | null;
   truckName: string | null;
   whId: string;
@@ -52,6 +53,7 @@ type KeySelection = {
   arrivedLngKey: string | null;
   whIdKey: string | null;
   offenderKey: string | null;
+  driverUsernameKey: string | null;
   truckNameKey: string | null;
   truckIdKey: string | null;
   invoiceIdKey: string | null;
@@ -242,6 +244,7 @@ const OFFENDER_ALIASES = [
 ];
 const TRUCK_NAME_ALIASES = ['truck', 'truck_name', 'vehicle_name', 'unit_name', 'samsara_vehicle_name'];
 const TRUCK_ID_ALIASES = ['truck_id', 'vehicle_id', 'truck number', 'truck_number', 'vehicle number', 'vehicle_number'];
+const DRIVER_USERNAME_ALIASES = ['driver', 'driver_username', 'username', 'samsara_username'];
 const INVOICE_ID_ALIASES = ['invoice', 'invoice_id', 'order_id'];
 const CUSTOMER_ALIASES = ['customer_name', 'customer', 'customername', 'account_name', 'account', 'store_name', 'ship_to_name', 'bill_to_company_name'];
 const INVOICE_TIME_ALIASES = ['invoice_time', 'invoice_datetime', 'invoice_ts', 'scheduled_time', 'requested_time'];
@@ -446,6 +449,7 @@ function detectKeys(rows: DataRow[]): KeySelection {
   const arrivedLngKey = pickExactKey(allKeys, ARRIVED_LNG_ALIASES) ?? pickContainsKey(allKeys, ['arrived_lng', 'arrival_lng']);
   const whIdKey = pickExactKey(allKeys, WH_ID_ALIASES) ?? pickContainsKey(allKeys, ['wh_id', 'warehouse', 'distribution_center', 'dc']);
   const offenderKey = pickExactKey(allKeys, OFFENDER_ALIASES) ?? pickContainsKey(allKeys, ['route', 'wh', 'driver', 'vehicle', 'truck', 'unit']);
+  const driverUsernameKey = pickExactKey(allKeys, DRIVER_USERNAME_ALIASES) ?? pickContainsKey(allKeys, ['driver', 'username']);
   const truckNameKey = pickExactKey(allKeys, TRUCK_NAME_ALIASES) ?? pickContainsKey(allKeys, ['truck_name', 'vehicle_name', 'unit_name', 'truck']);
   const truckIdKey = pickExactKey(allKeys, TRUCK_ID_ALIASES) ?? pickContainsKey(allKeys, ['truck_id', 'vehicle_id', 'truck number', 'vehicle number']);
   const invoiceIdKey = pickExactKey(allKeys, INVOICE_ID_ALIASES) ?? pickContainsKey(allKeys, ['invoice']);
@@ -461,6 +465,7 @@ function detectKeys(rows: DataRow[]): KeySelection {
     arrivedLngKey,
     whIdKey,
     offenderKey,
+    driverUsernameKey,
     truckNameKey,
     truckIdKey,
     invoiceIdKey,
@@ -496,6 +501,11 @@ function getSecondColumnValue(row: DataRow): unknown {
 function getThirdColumnValue(row: DataRow): unknown {
   const values = Object.values(row);
   return values.length > 2 ? values[2] : null;
+}
+
+function getFourthColumnValue(row: DataRow): unknown {
+  const values = Object.values(row);
+  return values.length > 3 ? values[3] : null;
 }
 
 function toRadians(value: number): number {
@@ -1140,6 +1150,8 @@ export default function ImpactScreen() {
       const whId = String(whIdRaw ?? '').trim() || 'Unknown WH';
       const offenderRaw = getField(row, keys.offenderKey);
       const offender = String(offenderRaw ?? '').trim() || 'Unknown';
+      const driverUsernameRaw = getField(row, keys.driverUsernameKey) ?? getFourthColumnValue(row);
+      const driverUsername = String(driverUsernameRaw ?? '').trim() || null;
       const truckNameRaw = getField(row, keys.truckNameKey) ?? getThirdColumnValue(row);
       const truckName = String(truckNameRaw ?? '').trim() || null;
       const truckIdRaw = getField(row, keys.truckIdKey);
@@ -1172,6 +1184,7 @@ export default function ImpactScreen() {
         arrivedLng: arrivedPair.lng,
         distanceMiles,
         offender,
+        driverUsername,
         truckId,
         truckName,
         whId,
@@ -1191,7 +1204,7 @@ export default function ImpactScreen() {
     }, { points: [], quality: initialQuality });
 
     return result;
-  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.truckIdKey, keys.truckNameKey, keys.whIdKey, rows]);
+  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.driverUsernameKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.truckIdKey, keys.truckNameKey, keys.whIdKey, rows]);
 
   const points = parsedPoints.points;
   const coordinateQuality = parsedPoints.quality;
@@ -1369,6 +1382,11 @@ export default function ImpactScreen() {
   const activeTruckName = useMemo(() => {
     const truckNames = Array.from(new Set(activeOffenderPoints.map((point) => point.truckName).filter((value): value is string => Boolean(value))));
     return truckNames.length === 1 ? truckNames[0] : null;
+  }, [activeOffenderPoints]);
+
+  const activeDriverUsername = useMemo(() => {
+    const driverUsernames = Array.from(new Set(activeOffenderPoints.map((point) => point.driverUsername).filter((value): value is string => Boolean(value))));
+    return driverUsernames.length === 1 ? driverUsernames[0] : null;
   }, [activeOffenderPoints]);
 
   const samsaraMinSpeedMph = useMemo(() => {
@@ -1769,6 +1787,7 @@ export default function ImpactScreen() {
       }
 
       const truckLookupLabel = activeTruckName ?? activeTruckId ?? selectedRouteSummary.offender;
+      const expectedDriverUsername = activeDriverUsername?.trim() ?? '';
 
       const proxyBases = resolveSamsaraProxyBases();
       let lastFailure: Error | null = null;
@@ -1833,6 +1852,16 @@ export default function ImpactScreen() {
           const totalDistanceMiles = segments.reduce((total, segment) => total + segment.distanceMiles, 0);
           const totalDurationMinutes = (new Date(tripPoints[tripPoints.length - 1].time).getTime() - new Date(tripPoints[0].time).getTime()) / 60_000;
           const driver = await fetchSamsaraDriverInfo(proxyBase, vehicleMatch.id);
+
+          if (expectedDriverUsername) {
+            if (!driver?.username) {
+              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" is present, but Samsara returned no username for this assigned driver.`);
+            }
+
+            if (driver.username.trim().toLowerCase() !== expectedDriverUsername.toLowerCase()) {
+              throw new Error(`Driver username validation failed: uploaded username "${expectedDriverUsername}" does not match Samsara username "${driver.username}".`);
+            }
+          }
 
           setSamsaraTripInfo({
             vehicleId: String(vehicleMatch.id),
@@ -2475,6 +2504,7 @@ export default function ImpactScreen() {
             {fileName ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Loaded: {fileName}</Text> : null}
             {keys.whIdKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>WH_ID column: {keys.whIdKey}</Text> : null}
             {keys.offenderKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Offender dimension: {keys.offenderKey}</Text> : null}
+            {keys.driverUsernameKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Driver username column: {keys.driverUsernameKey}</Text> : null}
             {keys.customerKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Customer dimension: {keys.customerKey}</Text> : null}
             {keys.invoiceTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Invoice time column: {keys.invoiceTimeKey}</Text> : null}
             {keys.arrivedTimeKey ? <Text style={[styles.helpText, { color: theme.mutedText }]}>Arrived time column: {keys.arrivedTimeKey}</Text> : null}
@@ -2773,6 +2803,9 @@ export default function ImpactScreen() {
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
             <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Selected Offender</Text>
             <Text style={[styles.offenderHeadline, { color: theme.bodyText }]}>{activeOffenderSummary.offender}</Text>
+            {activeDriverUsername ? (
+              <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>Uploaded driver username (column 4): {activeDriverUsername}</Text>
+            ) : null}
             {activeTruckName ? (
               <Text style={[styles.offenderCopy, { color: theme.mutedText }]}>Truck column: {activeTruckName}</Text>
             ) : activeTruckId ? (
