@@ -206,6 +206,12 @@ Optional future data source:
 - Impact now resolves Samsara trips from the parsed truck column, overlays the trip path on the mismatch map, and adds a toggle for hiding/showing that overlay.
 - A map-side Samsara Mission Control drawer was added so overlay controls can stay visible while panning/zooming the map.
 - Mission Control inputs now include explicit field labels (speed, idle, gap, harsh, and geofence thresholds) for faster operator reference.
+- Excel parsing now preserves formatted text values for route/truck fields, preventing accidental loss of leading zeros when possible.
+- Route search now supports leading-zero tolerant matching so values like 014 and 14 can be discovered consistently.
+- Samsara vehicle resolution now uses stricter token/exact matching to avoid substring false positives (for example, 2318 vs 223185).
+- Route-to-truck resolution now guards against ambiguous cross-warehouse matches and prompts users to narrow WH_ID when needed.
+- Samsara vehicle list lookup now paginates through all pages to support large fleets (500+ trucks).
+- Samsara driver lookup now paginates through all pages to support large driver directories.
 - The map legend now calls out the Samsara trip line and trip end marker.
 - Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
 - Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
