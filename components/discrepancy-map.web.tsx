@@ -28,11 +28,87 @@ type TripHistoryPoint = {
   speedMilesPerHour?: number;
 };
 
+type SpeedingEvent = {
+  id: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+};
+
+type IdleCluster = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  centerLat: number;
+  centerLng: number;
+  durationMinutes: number;
+  pointCount: number;
+};
+
+type HarshEvent = {
+  id: string;
+  kind: 'harsh_brake' | 'rapid_accel' | 'hard_corner';
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+  deltaMphPerSecond: number;
+};
+
+type PingGapEvent = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  gapMinutes: number;
+  distanceMiles: number;
+};
+
+type ProximityHit = {
+  id: string;
+  kind: 'invoice' | 'arrived';
+  label: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  distanceMiles: number;
+};
+
+type RiskSegment = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  distanceMiles: number;
+  durationMinutes: number;
+  riskScore: number;
+  riskBand: 'low' | 'medium' | 'high';
+};
+
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
   tripHistoryPoints?: TripHistoryPoint[];
   showTripHistory?: boolean;
+  speedingEvents?: SpeedingEvent[];
+  showSpeedingEvents?: boolean;
+  idleClusters?: IdleCluster[];
+  showIdleClusters?: boolean;
+  harshEvents?: HarshEvent[];
+  showHarshEvents?: boolean;
+  pingGapEvents?: PingGapEvent[];
+  showPingGapEvents?: boolean;
+  proximityHits?: ProximityHit[];
+  showProximityHits?: boolean;
+  riskSegments?: RiskSegment[];
+  showRiskSegments?: boolean;
   routeMapUrl?: string | null;
   compareSummary?: {
     date: string | null;
@@ -88,7 +164,40 @@ function formatEasternDateTime(ms: number): string {
   }).format(new Date(ms));
 }
 
-export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoints = [], showTripHistory = true, routeMapUrl, compareSummary, selectedPointId, onPointSelect }: DiscrepancyMapProps) {
+function colorForRiskBand(riskBand: 'low' | 'medium' | 'high'): string {
+  if (riskBand === 'high') {
+    return '#dc2626';
+  }
+
+  if (riskBand === 'medium') {
+    return '#f59e0b';
+  }
+
+  return '#16a34a';
+}
+
+export default function DiscrepancyMap({
+  points,
+  activeOffender,
+  tripHistoryPoints = [],
+  showTripHistory = true,
+  speedingEvents = [],
+  showSpeedingEvents = true,
+  idleClusters = [],
+  showIdleClusters = true,
+  harshEvents = [],
+  showHarshEvents = true,
+  pingGapEvents = [],
+  showPingGapEvents = true,
+  proximityHits = [],
+  showProximityHits = true,
+  riskSegments = [],
+  showRiskSegments = true,
+  routeMapUrl,
+  compareSummary,
+  selectedPointId,
+  onPointSelect,
+}: DiscrepancyMapProps) {
   const containerRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const layerRef = useRef<any>(null);
@@ -186,6 +295,144 @@ export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoin
         }
       }
 
+      if (showRiskSegments) {
+        for (const segment of riskSegments) {
+          const start: [number, number] = [segment.startLat, segment.startLng];
+          const end: [number, number] = [segment.endLat, segment.endLng];
+          const bandColor = colorForRiskBand(segment.riskBand);
+
+          L.polyline([start, end], {
+            color: bandColor,
+            weight: 7,
+            opacity: 0.55,
+            lineCap: 'round',
+          })
+            .bindTooltip(`Risk ${segment.riskBand.toUpperCase()} (${segment.riskScore.toFixed(1)})`, { permanent: false })
+            .bindPopup(`<strong>Segment risk</strong><br/>Band: ${segment.riskBand}<br/>Score: ${segment.riskScore.toFixed(1)}<br/>Distance: ${segment.distanceMiles.toFixed(2)} mi<br/>Duration: ${Math.max(0, Math.round(segment.durationMinutes))} min<br/>${formatEasternDateTime(Date.parse(segment.startTime))} to ${formatEasternDateTime(Date.parse(segment.endTime))}`)
+            .addTo(layerRef.current);
+
+          overviewBounds.extend(start);
+          overviewBounds.extend(end);
+        }
+      }
+
+      if (showSpeedingEvents) {
+        for (const event of speedingEvents) {
+          const eventLatLng: [number, number] = [event.latitude, event.longitude];
+          L.circleMarker(eventLatLng, {
+            radius: 5,
+            color: '#991b1b',
+            fillColor: '#ef4444',
+            fillOpacity: 0.95,
+            weight: 2,
+          })
+            .bindTooltip(`Speeding ${Math.round(event.speedMilesPerHour)} mph`, { permanent: false })
+            .bindPopup(`<strong>Speeding event</strong><br/>${Math.round(event.speedMilesPerHour)} mph<br/>${formatEasternDateTime(Date.parse(event.time))}`)
+            .addTo(layerRef.current);
+
+          overviewBounds.extend(eventLatLng);
+        }
+      }
+
+      if (showIdleClusters) {
+        for (const cluster of idleClusters) {
+          const idleCenter: [number, number] = [cluster.centerLat, cluster.centerLng];
+          const radiusMeters = Math.max(45, Math.min(180, cluster.durationMinutes * 3));
+
+          L.circle(idleCenter, {
+            radius: radiusMeters,
+            color: '#92400e',
+            fillColor: '#f59e0b',
+            fillOpacity: 0.22,
+            weight: 2,
+          })
+            .bindTooltip(`Idle cluster ${Math.round(cluster.durationMinutes)} min`, { permanent: false })
+            .bindPopup(`<strong>Idle cluster</strong><br/>${Math.round(cluster.durationMinutes)} min<br/>${cluster.pointCount} low-speed pings<br/>${formatEasternDateTime(Date.parse(cluster.startTime))} to ${formatEasternDateTime(Date.parse(cluster.endTime))}`)
+            .addTo(layerRef.current);
+
+          overviewBounds.extend(idleCenter);
+        }
+      }
+
+      if (showHarshEvents) {
+        for (const event of harshEvents) {
+          const latLng: [number, number] = [event.latitude, event.longitude];
+          const eventColor = event.kind === 'harsh_brake'
+            ? '#dc2626'
+            : event.kind === 'rapid_accel'
+              ? '#ea580c'
+              : '#7c3aed';
+          const eventLabel = event.kind === 'harsh_brake'
+            ? 'Harsh brake'
+            : event.kind === 'rapid_accel'
+              ? 'Rapid accel'
+              : 'Hard corner';
+
+          L.circleMarker(latLng, {
+            radius: 5,
+            color: '#111827',
+            fillColor: eventColor,
+            fillOpacity: 0.92,
+            weight: 1.5,
+          })
+            .bindTooltip(`${eventLabel} @ ${Math.round(event.speedMilesPerHour)} mph`, { permanent: false })
+            .bindPopup(`<strong>${eventLabel}</strong><br/>Speed: ${Math.round(event.speedMilesPerHour)} mph<br/>Delta: ${event.deltaMphPerSecond.toFixed(2)} mph/s<br/>${formatEasternDateTime(Date.parse(event.time))}`)
+            .addTo(layerRef.current);
+
+          overviewBounds.extend(latLng);
+        }
+      }
+
+      if (showPingGapEvents) {
+        for (const gap of pingGapEvents) {
+          const start: [number, number] = [gap.startLat, gap.startLng];
+          const end: [number, number] = [gap.endLat, gap.endLng];
+          const midLatLng: [number, number] = [(gap.startLat + gap.endLat) / 2, (gap.startLng + gap.endLng) / 2];
+
+          L.polyline([start, end], {
+            color: '#be185d',
+            weight: 4,
+            opacity: 0.75,
+            dashArray: '6 6',
+          })
+            .bindTooltip(`GPS gap ${gap.gapMinutes.toFixed(1)} min`, { permanent: false })
+            .bindPopup(`<strong>GPS ping gap</strong><br/>Gap: ${gap.gapMinutes.toFixed(1)} min<br/>Jump: ${gap.distanceMiles.toFixed(2)} mi<br/>${formatEasternDateTime(Date.parse(gap.startTime))} to ${formatEasternDateTime(Date.parse(gap.endTime))}`)
+            .addTo(layerRef.current);
+
+          L.circleMarker(midLatLng, {
+            radius: 4,
+            color: '#831843',
+            fillColor: '#f472b6',
+            fillOpacity: 0.95,
+            weight: 1.5,
+          }).addTo(layerRef.current);
+
+          overviewBounds.extend(start);
+          overviewBounds.extend(end);
+          overviewBounds.extend(midLatLng);
+        }
+      }
+
+      if (showProximityHits) {
+        for (const hit of proximityHits) {
+          const latLng: [number, number] = [hit.latitude, hit.longitude];
+          const hitColor = hit.kind === 'invoice' ? '#2563eb' : '#0f766e';
+
+          L.circleMarker(latLng, {
+            radius: 4,
+            color: hitColor,
+            fillColor: '#ffffff',
+            fillOpacity: 0.95,
+            weight: 2,
+          })
+            .bindTooltip(`${hit.kind === 'invoice' ? 'Invoice' : 'Arrived'} hit`, { permanent: false })
+            .bindPopup(`<strong>Customer geofence hit</strong><br/>Type: ${hit.kind}<br/>Target: ${hit.label}<br/>Distance: ${(hit.distanceMiles * 5280).toFixed(0)} ft<br/>${formatEasternDateTime(Date.parse(hit.time))}`)
+            .addTo(layerRef.current);
+
+          overviewBounds.extend(latLng);
+        }
+      }
+
       for (const point of points) {
         const invoice: [number, number] = [point.invoiceLat, point.invoiceLng];
         const arrived: [number, number] = [point.arrivedLat, point.arrivedLng];
@@ -263,7 +510,26 @@ export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoin
     return () => {
       disposed = true;
     };
-  }, [activeOffender, onPointSelect, points, selectedPointId, showTripHistory, tripHistoryPoints]);
+  }, [
+    activeOffender,
+    idleClusters,
+    onPointSelect,
+    pingGapEvents,
+    points,
+    proximityHits,
+    riskSegments,
+    selectedPointId,
+    showHarshEvents,
+    showIdleClusters,
+    showPingGapEvents,
+    showProximityHits,
+    showRiskSegments,
+    showSpeedingEvents,
+    showTripHistory,
+    speedingEvents,
+    harshEvents,
+    tripHistoryPoints,
+  ]);
 
   return (
     <View style={styles.shell}>
@@ -342,6 +608,12 @@ export default function DiscrepancyMap({ points, activeOffender, tripHistoryPoin
         <Text style={styles.legendItem}>Orange dot arrived</Text>
         <Text style={styles.legendItem}>Redder line bigger mismatch</Text>
         <Text style={styles.legendItem}>Blue line Samsara trip</Text>
+        <Text style={styles.legendItem}>Risk ribbons green/amber/red</Text>
+        <Text style={styles.legendItem}>Red dots speeding events</Text>
+        <Text style={styles.legendItem}>Amber circles idle clusters</Text>
+        <Text style={styles.legendItem}>Pink dashed lines GPS gaps</Text>
+        <Text style={styles.legendItem}>Teal/blue rings customer hits</Text>
+        <Text style={styles.legendItem}>Orange/red/purple harsh events</Text>
         <Text style={styles.legendItem}>Purple dot trip end</Text>
       </View>
     </View>

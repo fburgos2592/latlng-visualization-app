@@ -208,6 +208,70 @@ type SamsaraTripSegment = {
   maxSpeedMph: number;
 };
 
+type SamsaraSpeedingEvent = {
+  id: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+};
+
+type SamsaraIdleCluster = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  centerLat: number;
+  centerLng: number;
+  durationMinutes: number;
+  pointCount: number;
+};
+
+type SamsaraHarshEvent = {
+  id: string;
+  kind: 'harsh_brake' | 'rapid_accel' | 'hard_corner';
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+  deltaMphPerSecond: number;
+};
+
+type SamsaraPingGapEvent = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  gapMinutes: number;
+  distanceMiles: number;
+};
+
+type SamsaraProximityHit = {
+  id: string;
+  kind: 'invoice' | 'arrived';
+  label: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  distanceMiles: number;
+};
+
+type SamsaraRiskSegment = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  distanceMiles: number;
+  durationMinutes: number;
+  riskScore: number;
+  riskBand: 'low' | 'medium' | 'high';
+};
+
 type SamsaraTripInfo = {
   vehicleId: string;
   vehicleName: string;
@@ -523,6 +587,23 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return earthRadiusMiles * c;
+}
+
+function bearingDegrees(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const lat1Rad = toRadians(lat1);
+  const lat2Rad = toRadians(lat2);
+  const deltaLngRad = toRadians(lng2 - lng1);
+  const y = Math.sin(deltaLngRad) * Math.cos(lat2Rad);
+  const x =
+    (Math.cos(lat1Rad) * Math.sin(lat2Rad)) -
+    (Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(deltaLngRad));
+  const bearing = (Math.atan2(y, x) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+}
+
+function bearingDeltaDegrees(leftBearing: number, rightBearing: number): number {
+  const raw = Math.abs(leftBearing - rightBearing) % 360;
+  return raw > 180 ? 360 - raw : raw;
 }
 
 function parseTimeValue(value: unknown): number | null {
@@ -1066,6 +1147,7 @@ async function fetchSamsaraDriverByUsername(proxyBase: string, username: string)
 }
 
 export default function ImpactScreen() {
+  const DiscrepancyMapWithOverlays = DiscrepancyMap as React.ComponentType<any>;
   const windowDimensions = useWindowDimensions();
   const [layoutWidth, setLayoutWidth] = useState(() => {
     if (Platform.OS === 'web') {
@@ -1115,10 +1197,168 @@ export default function ImpactScreen() {
   const [isStopDrawerOpen, setIsStopDrawerOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
+  const [isMapMissionControlOpen, setIsMapMissionControlOpen] = useState(true);
   const [samsaraMinSpeedText, setSamsaraMinSpeedText] = useState('0');
   const [samsaraMovementFilter, setSamsaraMovementFilter] = useState<'all' | 'moving' | 'stopped'>('all');
   const [samsaraRequireGeocode, setSamsaraRequireGeocode] = useState(false);
+  const [samsaraSpeedingThresholdText, setSamsaraSpeedingThresholdText] = useState('50');
+  const [samsaraIdleMinutesText, setSamsaraIdleMinutesText] = useState('8');
+  const [samsaraGapMinutesText, setSamsaraGapMinutesText] = useState('8');
+  const [samsaraGeofenceRadiusFeetText, setSamsaraGeofenceRadiusFeetText] = useState('300');
+  const [samsaraHarshDeltaText, setSamsaraHarshDeltaText] = useState('7');
+  const [showSamsaraSpeedingOverlay, setShowSamsaraSpeedingOverlay] = useState(true);
+  const [showSamsaraIdleOverlay, setShowSamsaraIdleOverlay] = useState(true);
+  const [showSamsaraHarshOverlay, setShowSamsaraHarshOverlay] = useState(true);
+  const [showSamsaraGapOverlay, setShowSamsaraGapOverlay] = useState(true);
+  const [showSamsaraProximityOverlay, setShowSamsaraProximityOverlay] = useState(true);
+  const [showSamsaraRiskOverlay, setShowSamsaraRiskOverlay] = useState(true);
   const theme = darkMode ? darkTheme : lightTheme;
+
+  const samsaraPresetMode = useMemo<'everything' | 'operations' | 'coaching' | 'quality' | 'custom'>(() => {
+    if (
+      showSamsaraSpeedingOverlay &&
+      showSamsaraIdleOverlay &&
+      showSamsaraHarshOverlay &&
+      showSamsaraGapOverlay &&
+      showSamsaraProximityOverlay &&
+      showSamsaraRiskOverlay
+    ) {
+      return 'everything';
+    }
+
+    if (
+      !showSamsaraSpeedingOverlay &&
+      showSamsaraIdleOverlay &&
+      !showSamsaraHarshOverlay &&
+      showSamsaraGapOverlay &&
+      showSamsaraProximityOverlay &&
+      showSamsaraRiskOverlay
+    ) {
+      return 'operations';
+    }
+
+    if (
+      showSamsaraSpeedingOverlay &&
+      showSamsaraIdleOverlay &&
+      showSamsaraHarshOverlay &&
+      !showSamsaraGapOverlay &&
+      !showSamsaraProximityOverlay &&
+      showSamsaraRiskOverlay
+    ) {
+      return 'coaching';
+    }
+
+    if (
+      !showSamsaraSpeedingOverlay &&
+      !showSamsaraIdleOverlay &&
+      !showSamsaraHarshOverlay &&
+      showSamsaraGapOverlay &&
+      showSamsaraProximityOverlay &&
+      !showSamsaraRiskOverlay &&
+      samsaraRequireGeocode
+    ) {
+      return 'quality';
+    }
+
+    return 'custom';
+  }, [
+    samsaraRequireGeocode,
+    showSamsaraGapOverlay,
+    showSamsaraHarshOverlay,
+    showSamsaraIdleOverlay,
+    showSamsaraProximityOverlay,
+    showSamsaraRiskOverlay,
+    showSamsaraSpeedingOverlay,
+  ]);
+
+  const activeSamsaraLayerCount = useMemo(() => {
+    return [
+      showSamsaraSpeedingOverlay,
+      showSamsaraIdleOverlay,
+      showSamsaraHarshOverlay,
+      showSamsaraGapOverlay,
+      showSamsaraProximityOverlay,
+      showSamsaraRiskOverlay,
+    ].filter(Boolean).length;
+  }, [
+    showSamsaraGapOverlay,
+    showSamsaraHarshOverlay,
+    showSamsaraIdleOverlay,
+    showSamsaraProximityOverlay,
+    showSamsaraRiskOverlay,
+    showSamsaraSpeedingOverlay,
+  ]);
+
+  function applySamsaraPreset(mode: 'everything' | 'operations' | 'coaching' | 'quality') {
+    if (mode === 'everything') {
+      setSamsaraMinSpeedText('0');
+      setSamsaraMovementFilter('all');
+      setSamsaraRequireGeocode(false);
+      setSamsaraSpeedingThresholdText('50');
+      setSamsaraIdleMinutesText('8');
+      setSamsaraGapMinutesText('8');
+      setSamsaraGeofenceRadiusFeetText('300');
+      setSamsaraHarshDeltaText('7');
+      setShowSamsaraSpeedingOverlay(true);
+      setShowSamsaraIdleOverlay(true);
+      setShowSamsaraHarshOverlay(true);
+      setShowSamsaraGapOverlay(true);
+      setShowSamsaraProximityOverlay(true);
+      setShowSamsaraRiskOverlay(true);
+      return;
+    }
+
+    if (mode === 'operations') {
+      setSamsaraMinSpeedText('0');
+      setSamsaraMovementFilter('all');
+      setSamsaraRequireGeocode(false);
+      setSamsaraSpeedingThresholdText('55');
+      setSamsaraIdleMinutesText('10');
+      setSamsaraGapMinutesText('12');
+      setSamsaraGeofenceRadiusFeetText('450');
+      setSamsaraHarshDeltaText('8');
+      setShowSamsaraSpeedingOverlay(false);
+      setShowSamsaraIdleOverlay(true);
+      setShowSamsaraHarshOverlay(false);
+      setShowSamsaraGapOverlay(true);
+      setShowSamsaraProximityOverlay(true);
+      setShowSamsaraRiskOverlay(true);
+      return;
+    }
+
+    if (mode === 'coaching') {
+      setSamsaraMinSpeedText('0');
+      setSamsaraMovementFilter('all');
+      setSamsaraRequireGeocode(false);
+      setSamsaraSpeedingThresholdText('45');
+      setSamsaraIdleMinutesText('6');
+      setSamsaraGapMinutesText('10');
+      setSamsaraGeofenceRadiusFeetText('250');
+      setSamsaraHarshDeltaText('5');
+      setShowSamsaraSpeedingOverlay(true);
+      setShowSamsaraIdleOverlay(true);
+      setShowSamsaraHarshOverlay(true);
+      setShowSamsaraGapOverlay(false);
+      setShowSamsaraProximityOverlay(false);
+      setShowSamsaraRiskOverlay(true);
+      return;
+    }
+
+    setSamsaraMinSpeedText('0');
+    setSamsaraMovementFilter('all');
+    setSamsaraRequireGeocode(true);
+    setSamsaraSpeedingThresholdText('60');
+    setSamsaraIdleMinutesText('12');
+    setSamsaraGapMinutesText('6');
+    setSamsaraGeofenceRadiusFeetText('350');
+    setSamsaraHarshDeltaText('9');
+    setShowSamsaraSpeedingOverlay(false);
+    setShowSamsaraIdleOverlay(false);
+    setShowSamsaraHarshOverlay(false);
+    setShowSamsaraGapOverlay(true);
+    setShowSamsaraProximityOverlay(true);
+    setShowSamsaraRiskOverlay(false);
+  }
 
   const thresholdMiles = useMemo(() => {
     const parsed = Number(thresholdText);
@@ -1416,6 +1656,31 @@ export default function ImpactScreen() {
     return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
   }, [samsaraMinSpeedText]);
 
+  const samsaraSpeedingThresholdMph = useMemo(() => {
+    const parsed = Number(samsaraSpeedingThresholdText);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
+  }, [samsaraSpeedingThresholdText]);
+
+  const samsaraIdleThresholdMinutes = useMemo(() => {
+    const parsed = Number(samsaraIdleMinutesText);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 8;
+  }, [samsaraIdleMinutesText]);
+
+  const samsaraGapThresholdMinutes = useMemo(() => {
+    const parsed = Number(samsaraGapMinutesText);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 8;
+  }, [samsaraGapMinutesText]);
+
+  const samsaraGeofenceRadiusFeet = useMemo(() => {
+    const parsed = Number(samsaraGeofenceRadiusFeetText);
+    return Number.isFinite(parsed) && parsed >= 50 ? parsed : 300;
+  }, [samsaraGeofenceRadiusFeetText]);
+
+  const samsaraHarshDeltaMphPerSecond = useMemo(() => {
+    const parsed = Number(samsaraHarshDeltaText);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 7;
+  }, [samsaraHarshDeltaText]);
+
   const samsaraRawTripPoints = useMemo(() => samsaraTripInfo?.tripPath ?? [], [samsaraTripInfo]);
 
   const samsaraTripPoints = useMemo(() => {
@@ -1496,6 +1761,249 @@ export default function ImpactScreen() {
     };
   }, [samsaraRawTripPoints, samsaraTripPoints]);
 
+  const samsaraSpeedingEvents = useMemo<SamsaraSpeedingEvent[]>(() => {
+    return samsaraTripPoints
+      .filter((point) => (point.speedMilesPerHour ?? 0) >= samsaraSpeedingThresholdMph)
+      .map((point, index) => ({
+        id: `speed-${index}-${point.time}`,
+        time: point.time,
+        latitude: point.latitude,
+        longitude: point.longitude,
+        speedMilesPerHour: point.speedMilesPerHour ?? 0,
+      }));
+  }, [samsaraSpeedingThresholdMph, samsaraTripPoints]);
+
+  const samsaraIdleClusters = useMemo<SamsaraIdleCluster[]>(() => {
+    if (samsaraTripPoints.length < 2) {
+      return [];
+    }
+
+    const sortedPoints = [...samsaraTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+    const nearStopSpeedMph = 2;
+    const maxClusterJumpMiles = 0.15;
+    const clusters: SamsaraIdleCluster[] = [];
+    let currentCluster: SamsaraTripPoint[] = [];
+
+    const flushCluster = () => {
+      if (currentCluster.length < 2) {
+        currentCluster = [];
+        return;
+      }
+
+      const startTime = currentCluster[0].time;
+      const endTime = currentCluster[currentCluster.length - 1].time;
+      const durationMinutes = (new Date(endTime).getTime() - new Date(startTime).getTime()) / 60_000;
+
+      if (durationMinutes < samsaraIdleThresholdMinutes) {
+        currentCluster = [];
+        return;
+      }
+
+      const centerLat = currentCluster.reduce((total, point) => total + point.latitude, 0) / currentCluster.length;
+      const centerLng = currentCluster.reduce((total, point) => total + point.longitude, 0) / currentCluster.length;
+
+      clusters.push({
+        id: `idle-${clusters.length + 1}-${startTime}`,
+        startTime,
+        endTime,
+        centerLat,
+        centerLng,
+        durationMinutes,
+        pointCount: currentCluster.length,
+      });
+
+      currentCluster = [];
+    };
+
+    for (const point of sortedPoints) {
+      const speed = point.speedMilesPerHour ?? 0;
+      if (speed > nearStopSpeedMph) {
+        flushCluster();
+        continue;
+      }
+
+      if (currentCluster.length === 0) {
+        currentCluster = [point];
+        continue;
+      }
+
+      const previousPoint = currentCluster[currentCluster.length - 1];
+      const jumpMiles = haversineMiles(previousPoint.latitude, previousPoint.longitude, point.latitude, point.longitude);
+
+      if (jumpMiles > maxClusterJumpMiles) {
+        flushCluster();
+        currentCluster = [point];
+        continue;
+      }
+
+      currentCluster.push(point);
+    }
+
+    flushCluster();
+    return clusters;
+  }, [samsaraIdleThresholdMinutes, samsaraTripPoints]);
+
+  const samsaraHarshEvents = useMemo<SamsaraHarshEvent[]>(() => {
+    if (samsaraTripPoints.length < 3) {
+      return [];
+    }
+
+    const sortedPoints = [...samsaraTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+    const harshEvents: SamsaraHarshEvent[] = [];
+
+    for (let index = 1; index < sortedPoints.length; index += 1) {
+      const previousPoint = sortedPoints[index - 1];
+      const currentPoint = sortedPoints[index];
+      const previousSpeed = previousPoint.speedMilesPerHour ?? 0;
+      const currentSpeed = currentPoint.speedMilesPerHour ?? 0;
+      const deltaSpeed = currentSpeed - previousSpeed;
+      const deltaSeconds = (new Date(currentPoint.time).getTime() - new Date(previousPoint.time).getTime()) / 1000;
+      if (deltaSeconds <= 0) {
+        continue;
+      }
+
+      const deltaMphPerSecond = deltaSpeed / deltaSeconds;
+
+      if (deltaMphPerSecond <= -samsaraHarshDeltaMphPerSecond) {
+        harshEvents.push({
+          id: `harsh-brake-${index}-${currentPoint.time}`,
+          kind: 'harsh_brake',
+          time: currentPoint.time,
+          latitude: currentPoint.latitude,
+          longitude: currentPoint.longitude,
+          speedMilesPerHour: currentSpeed,
+          deltaMphPerSecond,
+        });
+      } else if (deltaMphPerSecond >= samsaraHarshDeltaMphPerSecond) {
+        harshEvents.push({
+          id: `rapid-accel-${index}-${currentPoint.time}`,
+          kind: 'rapid_accel',
+          time: currentPoint.time,
+          latitude: currentPoint.latitude,
+          longitude: currentPoint.longitude,
+          speedMilesPerHour: currentSpeed,
+          deltaMphPerSecond,
+        });
+      }
+
+      if (index < sortedPoints.length - 1) {
+        const nextPoint = sortedPoints[index + 1];
+        const inBearing = bearingDegrees(previousPoint.latitude, previousPoint.longitude, currentPoint.latitude, currentPoint.longitude);
+        const outBearing = bearingDegrees(currentPoint.latitude, currentPoint.longitude, nextPoint.latitude, nextPoint.longitude);
+        const headingChange = bearingDeltaDegrees(inBearing, outBearing);
+
+        if (headingChange >= 60 && currentSpeed >= 20) {
+          harshEvents.push({
+            id: `hard-corner-${index}-${currentPoint.time}`,
+            kind: 'hard_corner',
+            time: currentPoint.time,
+            latitude: currentPoint.latitude,
+            longitude: currentPoint.longitude,
+            speedMilesPerHour: currentSpeed,
+            deltaMphPerSecond,
+          });
+        }
+      }
+    }
+
+    return harshEvents;
+  }, [samsaraHarshDeltaMphPerSecond, samsaraTripPoints]);
+
+  const samsaraPingGapEvents = useMemo<SamsaraPingGapEvent[]>(() => {
+    if (samsaraTripPoints.length < 2) {
+      return [];
+    }
+
+    const sortedPoints = [...samsaraTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+    const gapEvents: SamsaraPingGapEvent[] = [];
+
+    for (let index = 1; index < sortedPoints.length; index += 1) {
+      const previousPoint = sortedPoints[index - 1];
+      const currentPoint = sortedPoints[index];
+      const gapMinutes = (new Date(currentPoint.time).getTime() - new Date(previousPoint.time).getTime()) / 60_000;
+      if (gapMinutes < samsaraGapThresholdMinutes) {
+        continue;
+      }
+
+      gapEvents.push({
+        id: `gap-${index}-${currentPoint.time}`,
+        startTime: previousPoint.time,
+        endTime: currentPoint.time,
+        startLat: previousPoint.latitude,
+        startLng: previousPoint.longitude,
+        endLat: currentPoint.latitude,
+        endLng: currentPoint.longitude,
+        gapMinutes,
+        distanceMiles: haversineMiles(previousPoint.latitude, previousPoint.longitude, currentPoint.latitude, currentPoint.longitude),
+      });
+    }
+
+    return gapEvents;
+  }, [samsaraGapThresholdMinutes, samsaraTripPoints]);
+
+  const samsaraProximityHits = useMemo<SamsaraProximityHit[]>(() => {
+    if (samsaraTripPoints.length === 0 || activeOffenderPoints.length === 0) {
+      return [];
+    }
+
+    const sortedPoints = [...samsaraTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+    const radiusMiles = samsaraGeofenceRadiusFeet / 5280;
+    const targets = activeOffenderPoints.flatMap((point) => {
+      const customerLabel = point.customerName ?? 'Unknown customer';
+      return [
+        {
+          targetKey: `invoice-${point.id}`,
+          kind: 'invoice' as const,
+          lat: point.invoiceLat,
+          lng: point.invoiceLng,
+          label: `${customerLabel} invoice ${point.invoiceId}`,
+        },
+        {
+          targetKey: `arrived-${point.id}`,
+          kind: 'arrived' as const,
+          lat: point.arrivedLat,
+          lng: point.arrivedLng,
+          label: `${customerLabel} arrived ${point.invoiceId}`,
+        },
+      ];
+    });
+
+    const insideTarget = new Map<string, boolean>();
+    const hits: SamsaraProximityHit[] = [];
+
+    for (const tripPoint of sortedPoints) {
+      for (const target of targets) {
+        const distanceMiles = haversineMiles(tripPoint.latitude, tripPoint.longitude, target.lat, target.lng);
+        const isInside = distanceMiles <= radiusMiles;
+        const wasInside = insideTarget.get(target.targetKey) ?? false;
+
+        if (isInside && !wasInside) {
+          hits.push({
+            id: `hit-${target.targetKey}-${tripPoint.time}`,
+            kind: target.kind,
+            label: target.label,
+            time: tripPoint.time,
+            latitude: tripPoint.latitude,
+            longitude: tripPoint.longitude,
+            distanceMiles,
+          });
+        }
+
+        insideTarget.set(target.targetKey, isInside);
+      }
+    }
+
+    return hits;
+  }, [activeOffenderPoints, samsaraGeofenceRadiusFeet, samsaraTripPoints]);
+
   const filteredSamsaraTripSegments = useMemo(
     () => segmentTripPoints(samsaraTripPoints),
     [samsaraTripPoints]
@@ -1515,6 +2023,48 @@ export default function ImpactScreen() {
 
     return (new Date(sortedPoints[sortedPoints.length - 1].time).getTime() - new Date(sortedPoints[0].time).getTime()) / 60_000;
   }, [samsaraTripPoints]);
+
+  const samsaraRiskSegments = useMemo<SamsaraRiskSegment[]>(() => {
+    if (filteredSamsaraTripSegments.length === 0) {
+      return [];
+    }
+
+    return filteredSamsaraTripSegments.map((segment) => {
+      const segmentStartMs = new Date(segment.startTime).getTime();
+      const segmentEndMs = new Date(segment.endTime).getTime();
+      const harshCount = samsaraHarshEvents.filter((event) => {
+        const eventMs = new Date(event.time).getTime();
+        return eventMs >= segmentStartMs && eventMs <= segmentEndMs;
+      }).length;
+      const gapCount = samsaraPingGapEvents.filter((event) => {
+        const eventMs = new Date(event.startTime).getTime();
+        return eventMs >= segmentStartMs && eventMs <= segmentEndMs;
+      }).length;
+
+      const score =
+        (Math.max(0, segment.maxSpeedMph - 35) * 1.1) +
+        (harshCount * 18) +
+        (gapCount * 9) +
+        (Math.max(0, segment.durationMinutes - 20) * 0.4) +
+        (segment.distanceMiles * 1.5);
+
+      const riskBand: SamsaraRiskSegment['riskBand'] = score >= 90 ? 'high' : score >= 45 ? 'medium' : 'low';
+
+      return {
+        id: `risk-segment-${segment.index}-${segment.startTime}`,
+        startTime: segment.startTime,
+        endTime: segment.endTime,
+        startLat: segment.startLat,
+        startLng: segment.startLng,
+        endLat: segment.endLat,
+        endLng: segment.endLng,
+        distanceMiles: segment.distanceMiles,
+        durationMinutes: segment.durationMinutes,
+        riskScore: score,
+        riskBand,
+      };
+    });
+  }, [filteredSamsaraTripSegments, samsaraHarshEvents, samsaraPingGapEvents]);
 
   const totalTripPages = Math.max(1, Math.ceil(filteredSamsaraTripSegments.length / 10));
   const visibleTripPage = Math.min(tripPage, totalTripPages);
@@ -1907,6 +2457,17 @@ export default function ImpactScreen() {
           setSamsaraMinSpeedText('0');
           setSamsaraMovementFilter('all');
           setSamsaraRequireGeocode(false);
+          setSamsaraSpeedingThresholdText('50');
+          setSamsaraIdleMinutesText('8');
+          setSamsaraGapMinutesText('8');
+          setSamsaraGeofenceRadiusFeetText('300');
+          setSamsaraHarshDeltaText('7');
+          setShowSamsaraSpeedingOverlay(true);
+          setShowSamsaraIdleOverlay(true);
+          setShowSamsaraHarshOverlay(true);
+          setShowSamsaraGapOverlay(true);
+          setShowSamsaraProximityOverlay(true);
+          setShowSamsaraRiskOverlay(true);
           setIsTripOverlayVisible(true);
 
           setError('');
@@ -2395,7 +2956,61 @@ export default function ImpactScreen() {
               <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
                 <Text style={[styles.label, { color: theme.mutedText }]}>Samsara overlay filters</Text>
                 {samsaraTripInfo ? (
-                  <>
+                  <View style={[styles.samsaraPanel, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
+                    <View style={styles.samsaraPanelHeader}>
+                      <Text style={[styles.samsaraPanelTitle, { color: theme.bodyText }]}>Mission Control</Text>
+                      <Text style={[styles.samsaraPanelSubtitle, { color: theme.mutedText }]}>Preset scenes + dense layer controls</Text>
+                    </View>
+
+                    <View style={styles.samsaraPresetRow}>
+                      {([
+                        { key: 'everything', label: 'Everything' },
+                        { key: 'operations', label: 'Ops' },
+                        { key: 'coaching', label: 'Coaching' },
+                        { key: 'quality', label: 'Data QA' },
+                      ] as const).map((preset) => {
+                        const isActive = samsaraPresetMode === preset.key;
+                        return (
+                          <Pressable
+                            key={`samsara-preset-${preset.key}`}
+                            onPress={() => applySamsaraPreset(preset.key)}
+                            style={[
+                              styles.samsaraPresetButton,
+                              {
+                                backgroundColor: isActive ? theme.accent : theme.cardBg,
+                                borderColor: isActive ? theme.accent : theme.inputBorder,
+                              },
+                            ]}>
+                            <Text style={[styles.samsaraPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{preset.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                      {samsaraPresetMode === 'custom' ? (
+                        <View style={[styles.samsaraCustomTag, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                          <Text style={[styles.samsaraCustomTagText, { color: theme.mutedText }]}>Custom</Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    <View style={[styles.samsaraRibbon, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
+                      <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                        <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Layers</Text>
+                        <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{activeSamsaraLayerCount}/6</Text>
+                      </View>
+                      <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                        <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Speeding</Text>
+                        <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraSpeedingEvents.length}</Text>
+                      </View>
+                      <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                        <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Harsh</Text>
+                        <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraHarshEvents.length}</Text>
+                      </View>
+                      <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                        <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Gaps</Text>
+                        <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraPingGapEvents.length}</Text>
+                      </View>
+                    </View>
+
                     <TextInput
                       value={samsaraMinSpeedText}
                       onChangeText={setSamsaraMinSpeedText}
@@ -2439,11 +3054,174 @@ export default function ImpactScreen() {
                         <Text style={[styles.lookbackPresetButtonText, { color: samsaraRequireGeocode ? '#ffffff' : theme.bodyText }]}>Geocoded only</Text>
                       </Pressable>
                     </View>
+                    <View style={[styles.lookbackPresetRow, { marginTop: 8 }]}>
+                      <TextInput
+                        value={samsaraSpeedingThresholdText}
+                        onChangeText={setSamsaraSpeedingThresholdText}
+                        keyboardType="decimal-pad"
+                        placeholder="Speeding threshold mph"
+                        placeholderTextColor={theme.subtleText}
+                        style={[
+                          styles.thresholdInput,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.inputBorder,
+                            color: theme.bodyText,
+                            minWidth: 170,
+                            flexGrow: 1,
+                          },
+                        ]}
+                      />
+                      <TextInput
+                        value={samsaraIdleMinutesText}
+                        onChangeText={setSamsaraIdleMinutesText}
+                        keyboardType="decimal-pad"
+                        placeholder="Idle threshold min"
+                        placeholderTextColor={theme.subtleText}
+                        style={[
+                          styles.thresholdInput,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.inputBorder,
+                            color: theme.bodyText,
+                            minWidth: 170,
+                            flexGrow: 1,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.lookbackPresetRow}>
+                      <Pressable
+                        onPress={() => setShowSamsaraSpeedingOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraSpeedingOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraSpeedingOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraSpeedingOverlay ? '#ffffff' : theme.bodyText }]}>Speeding overlay</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setShowSamsaraIdleOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraIdleOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraIdleOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraIdleOverlay ? '#ffffff' : theme.bodyText }]}>Idle clusters</Text>
+                      </Pressable>
+                    </View>
+                    <View style={styles.lookbackPresetRow}>
+                      <TextInput
+                        value={samsaraHarshDeltaText}
+                        onChangeText={setSamsaraHarshDeltaText}
+                        keyboardType="decimal-pad"
+                        placeholder="Harsh delta mph/s"
+                        placeholderTextColor={theme.subtleText}
+                        style={[
+                          styles.thresholdInput,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.inputBorder,
+                            color: theme.bodyText,
+                            minWidth: 170,
+                            flexGrow: 1,
+                          },
+                        ]}
+                      />
+                      <TextInput
+                        value={samsaraGapMinutesText}
+                        onChangeText={setSamsaraGapMinutesText}
+                        keyboardType="decimal-pad"
+                        placeholder="Ping gap minutes"
+                        placeholderTextColor={theme.subtleText}
+                        style={[
+                          styles.thresholdInput,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.inputBorder,
+                            color: theme.bodyText,
+                            minWidth: 170,
+                            flexGrow: 1,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.lookbackPresetRow}>
+                      <TextInput
+                        value={samsaraGeofenceRadiusFeetText}
+                        onChangeText={setSamsaraGeofenceRadiusFeetText}
+                        keyboardType="decimal-pad"
+                        placeholder="Customer geofence feet"
+                        placeholderTextColor={theme.subtleText}
+                        style={[
+                          styles.thresholdInput,
+                          {
+                            backgroundColor: theme.inputBg,
+                            borderColor: theme.inputBorder,
+                            color: theme.bodyText,
+                            minWidth: 170,
+                            flexGrow: 1,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <View style={styles.lookbackPresetRow}>
+                      <Pressable
+                        onPress={() => setShowSamsaraHarshOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraHarshOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraHarshOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraHarshOverlay ? '#ffffff' : theme.bodyText }]}>Harsh events</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setShowSamsaraGapOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraGapOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraGapOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraGapOverlay ? '#ffffff' : theme.bodyText }]}>Ping quality gaps</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setShowSamsaraProximityOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraProximityOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraProximityOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraProximityOverlay ? '#ffffff' : theme.bodyText }]}>Customer geofence hits</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => setShowSamsaraRiskOverlay((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: showSamsaraRiskOverlay ? theme.accent : theme.inputBg,
+                            borderColor: showSamsaraRiskOverlay ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraRiskOverlay ? '#ffffff' : theme.bodyText }]}>Risk ribbons</Text>
+                      </Pressable>
+                    </View>
                     {samsaraFilterStats ? (
                       <Text style={[styles.helpText, { color: theme.mutedText }]}>
                         Showing {samsaraFilterStats.filteredPointCount}/{samsaraFilterStats.rawPointCount} pings | moving {samsaraFilterStats.movingCount} | geocoded {samsaraFilterStats.geocodedCount} | max speed {Math.round(samsaraFilterStats.maxSpeedMph)} mph | avg moving {Math.round(samsaraFilterStats.avgMovingSpeedMph)} mph | avg ping gap {samsaraFilterStats.avgPingGapMinutes.toFixed(1)} min.
                       </Text>
                     ) : null}
+                    <Text style={[styles.helpText, { color: theme.mutedText }]}>Speeding events ({samsaraSpeedingThresholdMph.toFixed(0)}+ mph): {samsaraSpeedingEvents.length} | Idle clusters ({samsaraIdleThresholdMinutes.toFixed(0)}+ min): {samsaraIdleClusters.length}</Text>
+                    <Text style={[styles.helpText, { color: theme.mutedText }]}>Harsh events (|Δ| {samsaraHarshDeltaMphPerSecond.toFixed(1)}+ mph/s): {samsaraHarshEvents.length} | Ping gaps ({samsaraGapThresholdMinutes.toFixed(0)}+ min): {samsaraPingGapEvents.length} | Customer geofence hits ({samsaraGeofenceRadiusFeet.toFixed(0)} ft): {samsaraProximityHits.length} | Risk segments: {samsaraRiskSegments.length}</Text>
                     {samsaraTripInfo.driver ? (
                       <Text style={[styles.helpText, { color: theme.mutedText }]}>
                         Driver: {samsaraTripInfo.driver.name ?? 'Unknown'}
@@ -2454,7 +3232,7 @@ export default function ImpactScreen() {
                     ) : (
                       <Text style={[styles.helpText, { color: theme.mutedText }]}>No assigned driver was returned by Samsara for this vehicle/day.</Text>
                     )}
-                  </>
+                  </View>
                 ) : (
                   <Text style={[styles.helpText, { color: theme.mutedText }]}>Load Samsara Trip History to unlock speed, movement, and geocode filters for the trip overlay.</Text>
                 )}
@@ -2872,16 +3650,345 @@ export default function ImpactScreen() {
             <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
               Dashed connectors show invoice location to arrived location per invoice. More red means larger discrepancy.
             </Text>
-            <DiscrepancyMap
-              points={activeOffenderPoints}
-              activeOffender={activeOffenderSummary.offender}
-              routeMapUrl={activeRouteMapUrl}
-              compareSummary={compareSummary}
-              tripHistoryPoints={samsaraTripPoints}
-              showTripHistory={isTripOverlayVisible}
-              selectedPointId={selectedStop ? pointSelectionKey(selectedStop) : null}
-              onPointSelect={(pointId) => setSelectedStopId(pointId)}
-            />
+            <View style={styles.mapMissionControlHost}>
+              <DiscrepancyMapWithOverlays
+                points={activeOffenderPoints}
+                activeOffender={activeOffenderSummary.offender}
+                routeMapUrl={activeRouteMapUrl}
+                compareSummary={compareSummary}
+                tripHistoryPoints={samsaraTripPoints}
+                showTripHistory={isTripOverlayVisible}
+                speedingEvents={samsaraSpeedingEvents}
+                showSpeedingEvents={showSamsaraSpeedingOverlay}
+                idleClusters={samsaraIdleClusters}
+                showIdleClusters={showSamsaraIdleOverlay}
+                harshEvents={samsaraHarshEvents}
+                showHarshEvents={showSamsaraHarshOverlay}
+                pingGapEvents={samsaraPingGapEvents}
+                showPingGapEvents={showSamsaraGapOverlay}
+                proximityHits={samsaraProximityHits}
+                showProximityHits={showSamsaraProximityOverlay}
+                riskSegments={samsaraRiskSegments}
+                showRiskSegments={showSamsaraRiskOverlay}
+                selectedPointId={selectedStop ? pointSelectionKey(selectedStop) : null}
+                onPointSelect={(pointId: string) => setSelectedStopId(pointId)}
+              />
+
+              {samsaraTripInfo ? (
+                <View style={styles.mapMissionControlWrap} pointerEvents="box-none">
+                  <View
+                    style={[
+                      styles.mapMissionControlShell,
+                      {
+                        backgroundColor: theme.cardBg,
+                        borderColor: theme.cardBorder,
+                        shadowColor: darkMode ? '#020617' : '#0f172a',
+                        width: isMapMissionControlOpen ? (Platform.OS === 'web' ? 370 : 320) : 56,
+                      },
+                    ]}>
+                    <Pressable
+                      onPress={() => setIsMapMissionControlOpen((value) => !value)}
+                      style={[styles.mapMissionControlTab, { backgroundColor: theme.accent }]}>
+                      <Text style={styles.mapMissionControlTabGlyph}>{isMapMissionControlOpen ? '»' : '«'}</Text>
+                      <Text style={styles.mapMissionControlTabText}>Map</Text>
+                    </Pressable>
+
+                    {isMapMissionControlOpen ? (
+                      <ScrollView style={styles.mapMissionControlBody} nestedScrollEnabled>
+                        <View style={[styles.samsaraPanel, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder, marginTop: 0 }]}>
+                          <View style={styles.samsaraPanelHeader}>
+                            <Text style={[styles.samsaraPanelTitle, { color: theme.bodyText }]}>Mission Control</Text>
+                            <Text style={[styles.samsaraPanelSubtitle, { color: theme.mutedText }]}>Live map controls while you navigate</Text>
+                          </View>
+
+                          <View style={styles.samsaraPresetRow}>
+                            {([
+                              { key: 'everything', label: 'Everything' },
+                              { key: 'operations', label: 'Ops' },
+                              { key: 'coaching', label: 'Coaching' },
+                              { key: 'quality', label: 'Data QA' },
+                            ] as const).map((preset) => {
+                              const isActive = samsaraPresetMode === preset.key;
+                              return (
+                                <Pressable
+                                  key={`map-samsara-preset-${preset.key}`}
+                                  onPress={() => applySamsaraPreset(preset.key)}
+                                  style={[
+                                    styles.samsaraPresetButton,
+                                    {
+                                      backgroundColor: isActive ? theme.accent : theme.cardBg,
+                                      borderColor: isActive ? theme.accent : theme.inputBorder,
+                                    },
+                                  ]}>
+                                  <Text style={[styles.samsaraPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{preset.label}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+
+                          <View style={[styles.samsaraRibbon, { borderColor: theme.cardBorder, backgroundColor: theme.cardBg }]}>
+                            <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                              <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Layers</Text>
+                              <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{activeSamsaraLayerCount}/6</Text>
+                            </View>
+                            <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                              <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Speeding</Text>
+                              <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraSpeedingEvents.length}</Text>
+                            </View>
+                            <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                              <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Harsh</Text>
+                              <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraHarshEvents.length}</Text>
+                            </View>
+                            <View style={[styles.samsaraRibbonPill, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder }]}>
+                              <Text style={[styles.samsaraRibbonLabel, { color: theme.mutedText }]}>Gaps</Text>
+                              <Text style={[styles.samsaraRibbonValue, { color: theme.bodyText }]}>{samsaraPingGapEvents.length}</Text>
+                            </View>
+                          </View>
+
+                          <Text style={[styles.mapMissionControlGroupLabel, { color: theme.mutedText }]}>Movement mode</Text>
+                          <View style={styles.lookbackPresetRow}>
+                            {([
+                              { key: 'all', label: 'All' },
+                              { key: 'moving', label: 'Moving' },
+                              { key: 'stopped', label: 'Stopped' },
+                            ] as const).map((option) => {
+                              const isActive = samsaraMovementFilter === option.key;
+
+                              return (
+                                <Pressable
+                                  key={`map-samsara-movement-${option.key}`}
+                                  onPress={() => setSamsaraMovementFilter(option.key)}
+                                  style={[
+                                    styles.lookbackPresetButton,
+                                    {
+                                      backgroundColor: isActive ? theme.accent : theme.inputBg,
+                                      borderColor: isActive ? theme.accent : theme.inputBorder,
+                                    },
+                                  ]}>
+                                  <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{option.label}</Text>
+                                </Pressable>
+                              );
+                            })}
+                            <Pressable
+                              onPress={() => setSamsaraRequireGeocode((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: samsaraRequireGeocode ? theme.accent : theme.inputBg,
+                                  borderColor: samsaraRequireGeocode ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: samsaraRequireGeocode ? '#ffffff' : theme.bodyText }]}>Geocoded only</Text>
+                            </Pressable>
+                          </View>
+
+                          <Text style={[styles.mapMissionControlGroupLabel, { color: theme.mutedText }]}>Speed thresholds</Text>
+                          <View style={styles.mapMissionControlFieldGrid}>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Minimum speed (mph)</Text>
+                              <TextInput
+                                value={samsaraMinSpeedText}
+                                onChangeText={setSamsaraMinSpeedText}
+                                keyboardType="decimal-pad"
+                                placeholder="0"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 130,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Speeding threshold (mph)</Text>
+                              <TextInput
+                                value={samsaraSpeedingThresholdText}
+                                onChangeText={setSamsaraSpeedingThresholdText}
+                                keyboardType="decimal-pad"
+                                placeholder="50"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 130,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                          </View>
+
+                          <Text style={[styles.mapMissionControlGroupLabel, { color: theme.mutedText }]}>Event tuning</Text>
+                          <View style={styles.mapMissionControlFieldGrid}>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Idle cluster threshold (min)</Text>
+                              <TextInput
+                                value={samsaraIdleMinutesText}
+                                onChangeText={setSamsaraIdleMinutesText}
+                                keyboardType="decimal-pad"
+                                placeholder="8"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 110,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Ping gap threshold (min)</Text>
+                              <TextInput
+                                value={samsaraGapMinutesText}
+                                onChangeText={setSamsaraGapMinutesText}
+                                keyboardType="decimal-pad"
+                                placeholder="8"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 110,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Harsh event delta (mph/s)</Text>
+                              <TextInput
+                                value={samsaraHarshDeltaText}
+                                onChangeText={setSamsaraHarshDeltaText}
+                                keyboardType="decimal-pad"
+                                placeholder="7"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 110,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                          </View>
+
+                          <Text style={[styles.mapMissionControlGroupLabel, { color: theme.mutedText }]}>Geofence</Text>
+                          <View style={styles.mapMissionControlFieldGrid}>
+                            <View style={styles.mapMissionControlFieldItem}>
+                              <Text style={[styles.mapMissionControlFieldLabel, { color: theme.mutedText }]}>Customer geofence radius (ft)</Text>
+                              <TextInput
+                                value={samsaraGeofenceRadiusFeetText}
+                                onChangeText={setSamsaraGeofenceRadiusFeetText}
+                                keyboardType="decimal-pad"
+                                placeholder="300"
+                                placeholderTextColor={theme.subtleText}
+                                style={[
+                                  styles.thresholdInput,
+                                  {
+                                    backgroundColor: theme.inputBg,
+                                    borderColor: theme.inputBorder,
+                                    color: theme.bodyText,
+                                    minWidth: 150,
+                                    flexGrow: 1,
+                                  },
+                                ]}
+                              />
+                            </View>
+                          </View>
+
+                          <View style={styles.lookbackPresetRow}>
+                            <Pressable
+                              onPress={() => setShowSamsaraSpeedingOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraSpeedingOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraSpeedingOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraSpeedingOverlay ? '#ffffff' : theme.bodyText }]}>Speeding</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setShowSamsaraIdleOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraIdleOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraIdleOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraIdleOverlay ? '#ffffff' : theme.bodyText }]}>Idle</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setShowSamsaraHarshOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraHarshOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraHarshOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraHarshOverlay ? '#ffffff' : theme.bodyText }]}>Harsh</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setShowSamsaraGapOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraGapOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraGapOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraGapOverlay ? '#ffffff' : theme.bodyText }]}>Gaps</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setShowSamsaraProximityOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraProximityOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraProximityOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraProximityOverlay ? '#ffffff' : theme.bodyText }]}>Proximity</Text>
+                            </Pressable>
+                            <Pressable
+                              onPress={() => setShowSamsaraRiskOverlay((value) => !value)}
+                              style={[
+                                styles.lookbackPresetButton,
+                                {
+                                  backgroundColor: showSamsaraRiskOverlay ? theme.accent : theme.inputBg,
+                                  borderColor: showSamsaraRiskOverlay ? theme.accent : theme.inputBorder,
+                                },
+                              ]}>
+                              <Text style={[styles.lookbackPresetButtonText, { color: showSamsaraRiskOverlay ? '#ffffff' : theme.bodyText }]}>Risk</Text>
+                            </Pressable>
+                          </View>
+                        </View>
+                      </ScrollView>
+                    ) : null}
+                  </View>
+                </View>
+              ) : null}
+            </View>
           </View>
 
           <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}> 
@@ -3457,6 +4564,80 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  samsaraPanel: {
+    marginTop: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  samsaraPanelHeader: {
+    gap: 2,
+  },
+  samsaraPanelTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  samsaraPanelSubtitle: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  samsaraPresetRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    alignItems: 'center',
+  },
+  samsaraPresetButton: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  samsaraPresetButtonText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  samsaraCustomTag: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  samsaraCustomTagText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  samsaraRibbon: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  samsaraRibbonPill: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    minWidth: 78,
+    gap: 1,
+  },
+  samsaraRibbonLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  samsaraRibbonValue: {
+    fontSize: 14,
+    fontWeight: '900',
+    lineHeight: 16,
+  },
   dropdownWrap: {
     position: 'relative',
     zIndex: 220,
@@ -3998,6 +5179,73 @@ const styles = StyleSheet.create({
   thresholdScenarioMeta: {
     fontSize: 12,
     lineHeight: 17,
+  },
+  mapMissionControlHost: {
+    position: 'relative',
+    minHeight: 320,
+  },
+  mapMissionControlWrap: {
+    position: 'absolute',
+    top: 12,
+    right: 0,
+    zIndex: 140,
+  },
+  mapMissionControlShell: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 16,
+    overflow: 'hidden',
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+    maxHeight: 540,
+  },
+  mapMissionControlTab: {
+    width: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 10,
+  },
+  mapMissionControlTabGlyph: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '900',
+    lineHeight: 22,
+  },
+  mapMissionControlTabText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  mapMissionControlBody: {
+    flex: 1,
+    maxHeight: 540,
+  },
+  mapMissionControlGroupLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginTop: 2,
+  },
+  mapMissionControlFieldGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  mapMissionControlFieldItem: {
+    flexGrow: 1,
+    minWidth: 130,
+    gap: 4,
+  },
+  mapMissionControlFieldLabel: {
+    fontSize: 10,
+    fontWeight: '700',
   },
   summaryPopoutWrap: {
     position: 'absolute',

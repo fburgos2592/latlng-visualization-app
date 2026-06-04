@@ -23,11 +23,87 @@ type TripHistoryPoint = {
   speedMilesPerHour?: number;
 };
 
+type SpeedingEvent = {
+  id: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+};
+
+type IdleCluster = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  centerLat: number;
+  centerLng: number;
+  durationMinutes: number;
+  pointCount: number;
+};
+
+type HarshEvent = {
+  id: string;
+  kind: 'harsh_brake' | 'rapid_accel' | 'hard_corner';
+  time: string;
+  latitude: number;
+  longitude: number;
+  speedMilesPerHour: number;
+  deltaMphPerSecond: number;
+};
+
+type PingGapEvent = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  gapMinutes: number;
+  distanceMiles: number;
+};
+
+type ProximityHit = {
+  id: string;
+  kind: 'invoice' | 'arrived';
+  label: string;
+  time: string;
+  latitude: number;
+  longitude: number;
+  distanceMiles: number;
+};
+
+type RiskSegment = {
+  id: string;
+  startTime: string;
+  endTime: string;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  distanceMiles: number;
+  durationMinutes: number;
+  riskScore: number;
+  riskBand: 'low' | 'medium' | 'high';
+};
+
 type DiscrepancyMapProps = {
   points: DiscrepancyPoint[];
   activeOffender: string;
   tripHistoryPoints?: TripHistoryPoint[];
   showTripHistory?: boolean;
+  speedingEvents?: SpeedingEvent[];
+  showSpeedingEvents?: boolean;
+  idleClusters?: IdleCluster[];
+  showIdleClusters?: boolean;
+  harshEvents?: HarshEvent[];
+  showHarshEvents?: boolean;
+  pingGapEvents?: PingGapEvent[];
+  showPingGapEvents?: boolean;
+  proximityHits?: ProximityHit[];
+  showProximityHits?: boolean;
+  riskSegments?: RiskSegment[];
+  showRiskSegments?: boolean;
   routeMapUrl?: string | null;
   compareSummary?: {
     date: string | null;
