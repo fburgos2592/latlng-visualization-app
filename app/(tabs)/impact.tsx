@@ -394,6 +394,23 @@ function normalizeSearchToken(value: string): string {
   return normalized;
 }
 
+function splitSearchTokens(value: string): string[] {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function hasEquivalentToken(haystack: string, needle: string): boolean {
+  const normalizedNeedle = normalizeSearchToken(needle);
+  if (!normalizedNeedle) {
+    return false;
+  }
+
+  return splitSearchTokens(haystack).some((token) => normalizeSearchToken(token) === normalizedNeedle);
+}
+
 function toNumber(value: unknown): number | null {
   const raw = String(value ?? '').trim();
   if (!raw) {
@@ -2402,6 +2419,7 @@ export default function ImpactScreen() {
         );
       }
 
+      const hasExplicitTruckKey = Boolean(activeTruckName || activeTruckId);
       const truckLookupLabel = activeTruckName ?? activeTruckId ?? selectedRouteSummary.offender;
       const expectedDriverUsername = activeDriverUsername?.trim() ?? '';
 
@@ -2418,23 +2436,42 @@ export default function ImpactScreen() {
 
           const vehiclesPayload = await vehiclesResponse.json() as SamsaraVehicleListResponse;
           const vehicles = Array.isArray(vehiclesPayload.data) ? vehiclesPayload.data : [];
-            const selectedRoute = selectedRouteSummary.offender.trim().toLowerCase();
-            const selectedTruckLabel = truckLookupLabel.trim().toLowerCase();
+          const selectedRoute = selectedRouteSummary.offender.trim().toLowerCase();
+          const selectedTruckLabel = truckLookupLabel.trim().toLowerCase();
+          const normalizedTruckLabel = normalizeSearchToken(selectedTruckLabel);
+          const normalizedRouteLabel = normalizeSearchToken(selectedRoute);
           const vehicleMatch = vehicles.find((vehicle) => {
             const vehicleName = extractVehicleName(vehicle).toLowerCase();
             const vehicleIdText = String(vehicle.id).toLowerCase();
+            const normalizedVehicleName = normalizeSearchToken(vehicleName);
+            const normalizedVehicleId = normalizeSearchToken(vehicleIdText);
 
-            return (
-              vehicleIdText === selectedTruckLabel ||
-              vehicleIdText.includes(selectedTruckLabel) ||
-              selectedTruckLabel.includes(vehicleIdText) ||
-              vehicleName === selectedTruckLabel ||
-              vehicleName.includes(selectedTruckLabel) ||
-              selectedTruckLabel.includes(vehicleName) ||
-              vehicleName === selectedRoute ||
-              vehicleName.includes(selectedRoute) ||
-              selectedRoute.includes(vehicleName)
-            );
+            const truckExactMatch =
+              normalizedVehicleId === normalizedTruckLabel ||
+              normalizedVehicleName === normalizedTruckLabel;
+
+            const truckTokenMatch =
+              hasEquivalentToken(vehicleIdText, selectedTruckLabel) ||
+              hasEquivalentToken(vehicleName, selectedTruckLabel);
+
+            if (truckExactMatch || truckTokenMatch) {
+              return true;
+            }
+
+            if (hasExplicitTruckKey) {
+              // If we already have a truck key from the uploaded file, never fall back to route-name fuzzy matching.
+              return false;
+            }
+
+            const routeExactMatch =
+              normalizedVehicleName === normalizedRouteLabel ||
+              normalizedVehicleId === normalizedRouteLabel;
+
+            const routeTokenMatch =
+              hasEquivalentToken(vehicleName, selectedRoute) ||
+              hasEquivalentToken(vehicleIdText, selectedRoute);
+
+            return routeExactMatch || routeTokenMatch;
           });
 
           if (!vehicleMatch) {
