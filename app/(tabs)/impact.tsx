@@ -171,6 +171,25 @@ type SamsaraVehicleListResponse = {
   data?: SamsaraVehicleRecord[];
 };
 
+type SamsaraDriverRecord = {
+  id?: string | number;
+  name?: string;
+  username?: string;
+  phone?: string;
+};
+
+type SamsaraDriverListResponse = {
+  data?: SamsaraDriverRecord[];
+};
+
+type SamsaraDriverInfo = {
+  id: string | null;
+  name: string | null;
+  username: string | null;
+  phone: string | null;
+  source: string;
+};
+
 type SamsaraTripSegment = {
   index: number;
   startTime: string;
@@ -190,6 +209,7 @@ type SamsaraTripSegment = {
 type SamsaraTripInfo = {
   vehicleId: string;
   vehicleName: string;
+  driver: SamsaraDriverInfo | null;
   routeLabel: string;
   dateLabel: string;
   startTime: string;
@@ -936,6 +956,83 @@ function extractVehicleName(vehicle: { name?: string; id?: string | number }): s
   return String(vehicle.name ?? vehicle.id ?? '').trim();
 }
 
+function normalizeDriverRecord(raw: unknown, source: string): SamsaraDriverInfo | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const candidate = raw as {
+    id?: string | number;
+    name?: string;
+    username?: string;
+    phone?: string;
+    driverId?: string | number;
+    driverName?: string;
+  };
+
+  const id = candidate.id != null ? String(candidate.id) : candidate.driverId != null ? String(candidate.driverId) : null;
+  const name = String(candidate.name ?? candidate.driverName ?? '').trim() || null;
+  const username = String(candidate.username ?? '').trim() || null;
+  const phone = String(candidate.phone ?? '').trim() || null;
+
+  if (!id && !name && !username && !phone) {
+    return null;
+  }
+
+  return {
+    id,
+    name,
+    username,
+    phone,
+    source,
+  };
+}
+
+async function fetchSamsaraDriverInfo(proxyBase: string, vehicleId: string | number): Promise<SamsaraDriverInfo | null> {
+  const vehicleIdText = String(vehicleId);
+
+  // Prefer vehicle detail so we can resolve assigned driver directly when available.
+  try {
+    const vehicleDetailResponse = await fetch(`${proxyBase}/fleet/vehicles/${encodeURIComponent(vehicleIdText)}`);
+    if (vehicleDetailResponse.ok) {
+      const vehicleDetailPayload = await vehicleDetailResponse.json() as {
+        data?: {
+          staticAssignedDriver?: unknown;
+          assignedDriver?: unknown;
+          currentDriver?: unknown;
+          driver?: unknown;
+        };
+      };
+
+      const vehicleData = vehicleDetailPayload.data;
+      const directDriver = normalizeDriverRecord(vehicleData?.staticAssignedDriver, 'vehicle.staticAssignedDriver')
+        ?? normalizeDriverRecord(vehicleData?.assignedDriver, 'vehicle.assignedDriver')
+        ?? normalizeDriverRecord(vehicleData?.currentDriver, 'vehicle.currentDriver')
+        ?? normalizeDriverRecord(vehicleData?.driver, 'vehicle.driver');
+
+      if (directDriver) {
+        return directDriver;
+      }
+    }
+  } catch {
+    // Ignore and try the driver lookup fallback endpoint below.
+  }
+
+  try {
+    const driverParams = new URLSearchParams({ vehicleIds: vehicleIdText, limit: '25' });
+    const driverResponse = await fetch(`${proxyBase}/fleet/drivers?${driverParams.toString()}`);
+    if (!driverResponse.ok) {
+      return null;
+    }
+
+    const driverPayload = await driverResponse.json() as SamsaraDriverListResponse;
+    const firstDriver = Array.isArray(driverPayload.data) ? driverPayload.data[0] : null;
+    return normalizeDriverRecord(firstDriver, 'drivers.list');
+  } catch {
+    return null;
+  }
+}
+
 export default function ImpactScreen() {
   const windowDimensions = useWindowDimensions();
   const [layoutWidth, setLayoutWidth] = useState(() => {
@@ -986,6 +1083,9 @@ export default function ImpactScreen() {
   const [isStopDrawerOpen, setIsStopDrawerOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
+  const [samsaraMinSpeedText, setSamsaraMinSpeedText] = useState('0');
+  const [samsaraMovementFilter, setSamsaraMovementFilter] = useState<'all' | 'moving' | 'stopped'>('all');
+  const [samsaraRequireGeocode, setSamsaraRequireGeocode] = useState(false);
   const theme = darkMode ? darkTheme : lightTheme;
 
   const thresholdMiles = useMemo(() => {
@@ -1271,19 +1371,123 @@ export default function ImpactScreen() {
     return truckNames.length === 1 ? truckNames[0] : null;
   }, [activeOffenderPoints]);
 
-  const samsaraTripPoints = useMemo(() => samsaraTripInfo?.tripPath ?? [], [samsaraTripInfo]);
-  const totalTripPages = Math.max(1, Math.ceil((samsaraTripInfo?.segments.length ?? 0) / 10));
+  const samsaraMinSpeedMph = useMemo(() => {
+    const parsed = Number(samsaraMinSpeedText);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }, [samsaraMinSpeedText]);
+
+  const samsaraRawTripPoints = useMemo(() => samsaraTripInfo?.tripPath ?? [], [samsaraTripInfo]);
+
+  const samsaraTripPoints = useMemo(() => {
+    return samsaraRawTripPoints.filter((point) => {
+      const speed = point.speedMilesPerHour ?? 0;
+      if (speed < samsaraMinSpeedMph) {
+        return false;
+      }
+
+      if (samsaraMovementFilter === 'moving' && speed < 5) {
+        return false;
+      }
+
+      if (samsaraMovementFilter === 'stopped' && speed >= 5) {
+        return false;
+      }
+
+      if (samsaraRequireGeocode) {
+        const hasGeocode = Boolean(
+          point.reverseGeo?.formattedLocation?.trim() ||
+          point.address?.name?.trim()
+        );
+
+        if (!hasGeocode) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [samsaraMinSpeedMph, samsaraMovementFilter, samsaraRawTripPoints, samsaraRequireGeocode]);
+
+  const samsaraFilterStats = useMemo(() => {
+    if (samsaraRawTripPoints.length === 0) {
+      return null;
+    }
+
+    const sortedRawPoints = [...samsaraRawTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+
+    const movingCount = samsaraRawTripPoints.filter((point) => (point.speedMilesPerHour ?? 0) >= 5).length;
+    const geocodedCount = samsaraRawTripPoints.filter((point) => Boolean(point.reverseGeo?.formattedLocation?.trim() || point.address?.name?.trim())).length;
+    const maxSpeedMph = samsaraRawTripPoints.reduce((maxSpeed, point) => Math.max(maxSpeed, point.speedMilesPerHour ?? 0), 0);
+    const movingSpeedSamples = samsaraRawTripPoints.map((point) => point.speedMilesPerHour ?? 0).filter((speed) => speed >= 5);
+    const avgMovingSpeedMph = movingSpeedSamples.length > 0
+      ? movingSpeedSamples.reduce((total, speed) => total + speed, 0) / movingSpeedSamples.length
+      : 0;
+
+    let totalGapMinutes = 0;
+    let gapSamples = 0;
+    let largeGapCount = 0;
+
+    for (let index = 1; index < sortedRawPoints.length; index += 1) {
+      const previousMs = new Date(sortedRawPoints[index - 1].time).getTime();
+      const currentMs = new Date(sortedRawPoints[index].time).getTime();
+      const gapMinutes = (currentMs - previousMs) / 60_000;
+
+      if (gapMinutes > 0) {
+        totalGapMinutes += gapMinutes;
+        gapSamples += 1;
+
+        if (gapMinutes >= 10) {
+          largeGapCount += 1;
+        }
+      }
+    }
+
+    return {
+      rawPointCount: samsaraRawTripPoints.length,
+      filteredPointCount: samsaraTripPoints.length,
+      movingCount,
+      geocodedCount,
+      maxSpeedMph,
+      avgMovingSpeedMph,
+      avgPingGapMinutes: gapSamples > 0 ? totalGapMinutes / gapSamples : 0,
+      largeGapCount,
+    };
+  }, [samsaraRawTripPoints, samsaraTripPoints]);
+
+  const filteredSamsaraTripSegments = useMemo(
+    () => segmentTripPoints(samsaraTripPoints),
+    [samsaraTripPoints]
+  );
+  const filteredSamsaraDistanceMiles = useMemo(
+    () => filteredSamsaraTripSegments.reduce((total, segment) => total + segment.distanceMiles, 0),
+    [filteredSamsaraTripSegments]
+  );
+  const filteredSamsaraDurationMinutes = useMemo(() => {
+    if (samsaraTripPoints.length < 2) {
+      return 0;
+    }
+
+    const sortedPoints = [...samsaraTripPoints].sort(
+      (left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()
+    );
+
+    return (new Date(sortedPoints[sortedPoints.length - 1].time).getTime() - new Date(sortedPoints[0].time).getTime()) / 60_000;
+  }, [samsaraTripPoints]);
+
+  const totalTripPages = Math.max(1, Math.ceil(filteredSamsaraTripSegments.length / 10));
   const visibleTripPage = Math.min(tripPage, totalTripPages);
   const pagedTripSegments = useMemo(() => {
     const startIndex = (visibleTripPage - 1) * 10;
-    return samsaraTripInfo?.segments.slice(startIndex, startIndex + 10) ?? [];
-  }, [samsaraTripInfo, visibleTripPage]);
-  const tripPageStartCount = samsaraTripInfo && samsaraTripInfo.segments.length > 0 ? ((visibleTripPage - 1) * 10) + 1 : 0;
-  const tripPageEndCount = Math.min(visibleTripPage * 10, samsaraTripInfo?.segments.length ?? 0);
+    return filteredSamsaraTripSegments.slice(startIndex, startIndex + 10);
+  }, [filteredSamsaraTripSegments, visibleTripPage]);
+  const tripPageStartCount = filteredSamsaraTripSegments.length > 0 ? ((visibleTripPage - 1) * 10) + 1 : 0;
+  const tripPageEndCount = Math.min(visibleTripPage * 10, filteredSamsaraTripSegments.length);
 
   useEffect(() => {
     setTripPage(1);
-  }, [samsaraTripInfo?.vehicleId, samsaraTripInfo?.routeLabel, samsaraTripInfo?.dateLabel]);
+  }, [filteredSamsaraTripSegments.length, samsaraTripInfo?.vehicleId, samsaraTripInfo?.routeLabel, samsaraTripInfo?.dateLabel]);
 
   const stopTablePoints = useMemo(() => {
     const normalizedQuery = stopSearchQuery.trim().toLowerCase();
@@ -1628,10 +1832,12 @@ export default function ImpactScreen() {
           const segments = segmentTripPoints(tripPoints);
           const totalDistanceMiles = segments.reduce((total, segment) => total + segment.distanceMiles, 0);
           const totalDurationMinutes = (new Date(tripPoints[tripPoints.length - 1].time).getTime() - new Date(tripPoints[0].time).getTime()) / 60_000;
+          const driver = await fetchSamsaraDriverInfo(proxyBase, vehicleMatch.id);
 
           setSamsaraTripInfo({
             vehicleId: String(vehicleMatch.id),
             vehicleName: extractVehicleName(vehicleMatch),
+            driver,
             routeLabel: selectedRouteSummary.offender,
             dateLabel: dayWindow.dateLabel,
             startTime: tripPoints[0].time,
@@ -1643,6 +1849,9 @@ export default function ImpactScreen() {
             tripPath: tripPoints,
             segments,
           });
+          setSamsaraMinSpeedText('0');
+          setSamsaraMovementFilter('all');
+          setSamsaraRequireGeocode(false);
           setIsTripOverlayVisible(true);
 
           setError('');
@@ -2127,6 +2336,74 @@ export default function ImpactScreen() {
                   })}
                 </View>
               </View>
+
+              <View style={[styles.thresholdBlock, isCompactLayout ? styles.thresholdBlockCompact : null]}>
+                <Text style={[styles.label, { color: theme.mutedText }]}>Samsara overlay filters</Text>
+                {samsaraTripInfo ? (
+                  <>
+                    <TextInput
+                      value={samsaraMinSpeedText}
+                      onChangeText={setSamsaraMinSpeedText}
+                      keyboardType="decimal-pad"
+                      placeholder="Minimum speed mph"
+                      placeholderTextColor={theme.subtleText}
+                      style={[styles.thresholdInput, { backgroundColor: theme.inputBg, borderColor: theme.inputBorder, color: theme.bodyText }]}
+                    />
+                    <View style={styles.lookbackPresetRow}>
+                      {([
+                        { key: 'all', label: 'All' },
+                        { key: 'moving', label: 'Moving' },
+                        { key: 'stopped', label: 'Stopped' },
+                      ] as const).map((option) => {
+                        const isActive = samsaraMovementFilter === option.key;
+
+                        return (
+                          <Pressable
+                            key={`samsara-movement-${option.key}`}
+                            onPress={() => setSamsaraMovementFilter(option.key)}
+                            style={[
+                              styles.lookbackPresetButton,
+                              {
+                                backgroundColor: isActive ? theme.accent : theme.inputBg,
+                                borderColor: isActive ? theme.accent : theme.inputBorder,
+                              },
+                            ]}>
+                            <Text style={[styles.lookbackPresetButtonText, { color: isActive ? '#ffffff' : theme.bodyText }]}>{option.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                      <Pressable
+                        onPress={() => setSamsaraRequireGeocode((value) => !value)}
+                        style={[
+                          styles.lookbackPresetButton,
+                          {
+                            backgroundColor: samsaraRequireGeocode ? theme.accent : theme.inputBg,
+                            borderColor: samsaraRequireGeocode ? theme.accent : theme.inputBorder,
+                          },
+                        ]}>
+                        <Text style={[styles.lookbackPresetButtonText, { color: samsaraRequireGeocode ? '#ffffff' : theme.bodyText }]}>Geocoded only</Text>
+                      </Pressable>
+                    </View>
+                    {samsaraFilterStats ? (
+                      <Text style={[styles.helpText, { color: theme.mutedText }]}>
+                        Showing {samsaraFilterStats.filteredPointCount}/{samsaraFilterStats.rawPointCount} pings | moving {samsaraFilterStats.movingCount} | geocoded {samsaraFilterStats.geocodedCount} | max speed {Math.round(samsaraFilterStats.maxSpeedMph)} mph | avg moving {Math.round(samsaraFilterStats.avgMovingSpeedMph)} mph | avg ping gap {samsaraFilterStats.avgPingGapMinutes.toFixed(1)} min.
+                      </Text>
+                    ) : null}
+                    {samsaraTripInfo.driver ? (
+                      <Text style={[styles.helpText, { color: theme.mutedText }]}>
+                        Driver: {samsaraTripInfo.driver.name ?? 'Unknown'}
+                        {samsaraTripInfo.driver.username ? ` | ${samsaraTripInfo.driver.username}` : ''}
+                        {samsaraTripInfo.driver.phone ? ` | ${samsaraTripInfo.driver.phone}` : ''}
+                        {samsaraTripInfo.driver.id ? ` | ID ${samsaraTripInfo.driver.id}` : ''}
+                      </Text>
+                    ) : (
+                      <Text style={[styles.helpText, { color: theme.mutedText }]}>No assigned driver was returned by Samsara for this vehicle/day.</Text>
+                    )}
+                  </>
+                ) : (
+                  <Text style={[styles.helpText, { color: theme.mutedText }]}>Load Samsara Trip History to unlock speed, movement, and geocode filters for the trip overlay.</Text>
+                )}
+              </View>
             </View>
 
             <Text style={[styles.helpText, { color: theme.mutedText }]}>Rolling window: last {lookbackHours}h per offender/truck, anchored to the latest timestamp for each route.</Text>
@@ -2595,6 +2872,10 @@ export default function ImpactScreen() {
                     <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Truck / vehicle</Text>
                     <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]} numberOfLines={2}>{samsaraTripInfo.vehicleName}</Text>
                     <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>ID {samsaraTripInfo.vehicleId}</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]} numberOfLines={2}>
+                      Driver {samsaraTripInfo.driver?.name ?? 'Not returned'}
+                      {samsaraTripInfo.driver?.id ? ` (ID ${samsaraTripInfo.driver.id})` : ''}
+                    </Text>
                   </View>
                   <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
                     <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Window</Text>
@@ -2603,13 +2884,13 @@ export default function ImpactScreen() {
                   </View>
                   <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
                     <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Distance</Text>
-                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{samsaraTripInfo.totalDistanceMiles.toFixed(1)} mi</Text>
-                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>{Math.round(samsaraTripInfo.totalDurationMinutes)} min across {samsaraTripInfo.pointCount} GPS points</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{filteredSamsaraDistanceMiles.toFixed(1)} mi</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>{Math.max(0, Math.round(filteredSamsaraDurationMinutes))} min across {samsaraTripPoints.length} filtered GPS points ({samsaraRawTripPoints.length} raw)</Text>
                   </View>
                   <View style={[styles.summaryMetricCard, { backgroundColor: theme.accentSoft, borderColor: theme.cardBorder }]}>
                     <Text style={[styles.summaryMetricLabel, { color: theme.mutedText }]}>Segments</Text>
-                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{samsaraTripInfo.segmentCount}</Text>
-                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Grouped by trip gaps and movement changes</Text>
+                    <Text style={[styles.summaryMetricValue, { color: theme.bodyText }]}>{filteredSamsaraTripSegments.length}</Text>
+                    <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Filtered from {samsaraTripInfo.segmentCount} total segments</Text>
                   </View>
                 </View>
 
@@ -2631,7 +2912,7 @@ export default function ImpactScreen() {
                     <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Trip history loaded, but no multi-point segments were detected in the selected window.</Text>
                   )}
                 </View>
-                {samsaraTripInfo.segments.length > 10 ? (
+                {filteredSamsaraTripSegments.length > 10 ? (
                   <View style={styles.paginationRow}>
                     <Pressable
                       onPress={() => setTripPage((current) => Math.max(1, current - 1))}
@@ -2643,7 +2924,7 @@ export default function ImpactScreen() {
                       ]}>
                       <Text style={styles.paginationButtonText}>Previous</Text>
                     </Pressable>
-                    <Text style={[styles.paginationText, { color: theme.mutedText }]}>Page {visibleTripPage} of {totalTripPages} | Showing {tripPageStartCount}-{tripPageEndCount} of {samsaraTripInfo.segments.length}</Text>
+                    <Text style={[styles.paginationText, { color: theme.mutedText }]}>Page {visibleTripPage} of {totalTripPages} | Showing {tripPageStartCount}-{tripPageEndCount} of {filteredSamsaraTripSegments.length} filtered segments</Text>
                     <Pressable
                       onPress={() => setTripPage((current) => Math.min(totalTripPages, current + 1))}
                       disabled={visibleTripPage >= totalTripPages}
