@@ -188,6 +188,12 @@ type SamsaraDriverRecord = {
 
 type SamsaraDriverListResponse = {
   data?: SamsaraDriverRecord[];
+  pagination?: {
+    endCursor?: string;
+    nextCursor?: string;
+    hasNextPage?: boolean;
+    hasNext?: boolean;
+  };
 };
 
 type SamsaraDriverInfo = {
@@ -1146,14 +1152,8 @@ async function fetchSamsaraDriverInfo(proxyBase: string, vehicleId: string | num
   }
 
   try {
-    const driverParams = new URLSearchParams({ vehicleIds: vehicleIdText, limit: '25' });
-    const driverResponse = await fetch(`${proxyBase}/fleet/drivers?${driverParams.toString()}`);
-    if (!driverResponse.ok) {
-      return null;
-    }
-
-    const driverPayload = await driverResponse.json() as SamsaraDriverListResponse;
-    const firstDriver = Array.isArray(driverPayload.data) ? driverPayload.data[0] : null;
+    const drivers = await fetchAllSamsaraDrivers(proxyBase, { vehicleIds: vehicleIdText }, 10);
+    const firstDriver = drivers[0] ?? null;
     return normalizeDriverRecord(firstDriver, 'drivers.list');
   } catch {
     return null;
@@ -1167,19 +1167,47 @@ async function fetchSamsaraDriverByUsername(proxyBase: string, username: string)
   }
 
   try {
-    const driverParams = new URLSearchParams({ limit: '512' });
-    const driverResponse = await fetch(`${proxyBase}/fleet/drivers?${driverParams.toString()}`);
-    if (!driverResponse.ok) {
-      return null;
-    }
-
-    const driverPayload = await driverResponse.json() as SamsaraDriverListResponse;
-    const drivers = Array.isArray(driverPayload.data) ? driverPayload.data : [];
+    const drivers = await fetchAllSamsaraDrivers(proxyBase);
     const usernameMatch = drivers.find((entry) => String(entry.username ?? '').trim().toLowerCase() === normalizedUsername);
     return normalizeDriverRecord(usernameMatch, 'drivers.usernameLookup');
   } catch {
     return null;
   }
+}
+
+async function fetchAllSamsaraDrivers(
+  proxyBase: string,
+  baseParams: Record<string, string> = {},
+  maxPages = 40
+): Promise<SamsaraDriverRecord[]> {
+  const allDrivers: SamsaraDriverRecord[] = [];
+  let afterCursor: string | null = null;
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const params = new URLSearchParams({ limit: '512', ...baseParams });
+    if (afterCursor) {
+      params.set('after', afterCursor);
+    }
+
+    const response = await fetch(`${proxyBase}/fleet/drivers?${params.toString()}`);
+    if (!response.ok) {
+      return allDrivers;
+    }
+
+    const payload = await response.json() as SamsaraDriverListResponse;
+    const pageDrivers = Array.isArray(payload.data) ? payload.data : [];
+    allDrivers.push(...pageDrivers);
+
+    const nextCursor = payload.pagination?.endCursor ?? payload.pagination?.nextCursor ?? null;
+    const hasNextPage = Boolean(payload.pagination?.hasNextPage ?? payload.pagination?.hasNext);
+    if (!hasNextPage || !nextCursor || pageDrivers.length === 0) {
+      break;
+    }
+
+    afterCursor = nextCursor;
+  }
+
+  return allDrivers;
 }
 
 async function fetchAllSamsaraVehicles(proxyBase: string): Promise<SamsaraVehicleRecord[]> {
