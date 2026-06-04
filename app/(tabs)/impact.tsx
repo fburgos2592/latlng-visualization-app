@@ -101,6 +101,31 @@ type DatasetSnapshot = {
   avgAbsTimeDeltaMinutes: number;
 };
 
+type ThresholdScenario = {
+  label: string;
+  thresholdMiles: number;
+  flaggedStops: number;
+  flaggedRate: number;
+  impactedOffenders: number;
+  impactedOffenderRate: number;
+};
+
+type ThresholdRecommendation = {
+  sampleSize: number;
+  p50Miles: number;
+  p80Miles: number;
+  p90Miles: number;
+  p95Miles: number;
+  iqrUpperFenceMiles: number;
+  recommendedThresholdMiles: number;
+  guardrailThresholdMiles: number;
+  strictThresholdMiles: number;
+  scenarios: ThresholdScenario[];
+  currentThresholdFlaggedRate: number;
+  currentThresholdFlaggedStops: number;
+  rationale: string;
+};
+
 type CoordinatePair = {
   lat: number;
   lng: number;
@@ -719,6 +744,11 @@ function pointSelectionKey(point: DiscrepancyPoint): string {
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function roundThresholdMiles(value: number): number {
+  const quarterStep = 0.25;
+  return Math.round(value / quarterStep) * quarterStep;
 }
 
 function percentile(sortedValues: number[], pct: number): number {
@@ -1452,6 +1482,15 @@ export default function ImpactScreen() {
       { Metric: 'Excluded Invalid Coord Rows', Value: coordinateQuality.excludedRows },
       { Metric: 'Swapped Coord Pairs (Auto-fixed)', Value: coordinateQuality.swappedPairs },
       { Metric: 'Scaled Coord Pairs (Auto-fixed)', Value: coordinateQuality.scaledPairs },
+      { Metric: 'Current Threshold (mi)', Value: thresholdMiles },
+      { Metric: 'Current Threshold Flagged Stops', Value: thresholdRecommendation?.currentThresholdFlaggedStops ?? globalOverThreshold },
+      { Metric: 'Current Threshold Flagged Rate', Value: Number(((thresholdRecommendation?.currentThresholdFlaggedRate ?? 0) * 100).toFixed(2)) },
+      { Metric: 'Recommended Threshold (mi)', Value: thresholdRecommendation?.recommendedThresholdMiles ?? '' },
+      { Metric: 'Guardrail Threshold (mi)', Value: thresholdRecommendation?.guardrailThresholdMiles ?? '' },
+      { Metric: 'Strict Threshold (mi)', Value: thresholdRecommendation?.strictThresholdMiles ?? '' },
+      { Metric: 'P80 Mismatch (mi)', Value: thresholdRecommendation ? Number(thresholdRecommendation.p80Miles.toFixed(4)) : '' },
+      { Metric: 'P90 Mismatch (mi)', Value: thresholdRecommendation ? Number(thresholdRecommendation.p90Miles.toFixed(4)) : '' },
+      { Metric: 'P95 Mismatch (mi)', Value: thresholdRecommendation ? Number(thresholdRecommendation.p95Miles.toFixed(4)) : '' },
     ];
 
     const followUpRows = outlierAnalysis.followUpQueue.map((entry, index) => ({
@@ -1627,6 +1666,74 @@ export default function ImpactScreen() {
     () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles).length,
     [filteredPoints, thresholdMiles]
   );
+
+  const thresholdRecommendation = useMemo<ThresholdRecommendation | null>(() => {
+    if (filteredPoints.length < 20) {
+      return null;
+    }
+
+    const sortedMiles = filteredPoints.map((point) => point.distanceMiles).sort((left, right) => left - right);
+    const uniqueOffenderCount = new Set(filteredPoints.map((point) => point.offender)).size;
+    const p50Miles = percentile(sortedMiles, 0.5);
+    const p80Miles = percentile(sortedMiles, 0.8);
+    const p90Miles = percentile(sortedMiles, 0.9);
+    const p95Miles = percentile(sortedMiles, 0.95);
+    const p97Miles = percentile(sortedMiles, 0.97);
+
+    const q1 = percentile(sortedMiles, 0.25);
+    const q3 = percentile(sortedMiles, 0.75);
+    const iqrUpperFenceMiles = q3 + (1.5 * (q3 - q1));
+
+    const recommendedThresholdMiles = Math.max(0.5, roundThresholdMiles(Math.max(p80Miles, Math.min(p90Miles, iqrUpperFenceMiles))));
+    const guardrailThresholdMiles = Math.max(
+      recommendedThresholdMiles,
+      roundThresholdMiles(Math.max(p90Miles, Math.min(p95Miles, iqrUpperFenceMiles)))
+    );
+    const strictThresholdMiles = Math.max(
+      guardrailThresholdMiles,
+      roundThresholdMiles(Math.max(p95Miles, p97Miles))
+    );
+
+    const buildScenario = (label: string, scenarioThreshold: number): ThresholdScenario => {
+      const flagged = filteredPoints.filter((point) => point.distanceMiles >= scenarioThreshold);
+      const impactedOffenders = new Set(flagged.map((point) => point.offender)).size;
+
+      return {
+        label,
+        thresholdMiles: scenarioThreshold,
+        flaggedStops: flagged.length,
+        flaggedRate: flagged.length / filteredPoints.length,
+        impactedOffenders,
+        impactedOffenderRate: uniqueOffenderCount > 0 ? impactedOffenders / uniqueOffenderCount : 0,
+      };
+    };
+
+    const scenarios = [
+      buildScenario('Early warning', Math.max(0.5, roundThresholdMiles(p80Miles))),
+      buildScenario('Recommended', recommendedThresholdMiles),
+      buildScenario('Guardrail', guardrailThresholdMiles),
+      buildScenario('Strict', strictThresholdMiles),
+    ];
+
+    const currentThresholdFlaggedStops = filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles).length;
+    const currentThresholdFlaggedRate = currentThresholdFlaggedStops / filteredPoints.length;
+
+    return {
+      sampleSize: filteredPoints.length,
+      p50Miles,
+      p80Miles,
+      p90Miles,
+      p95Miles,
+      iqrUpperFenceMiles,
+      recommendedThresholdMiles,
+      guardrailThresholdMiles,
+      strictThresholdMiles,
+      scenarios,
+      currentThresholdFlaggedRate,
+      currentThresholdFlaggedStops,
+      rationale: 'Recommended threshold is anchored near the 80th-90th percentile and capped by the IQR upper fence to balance enforcement volume and true outlier capture.',
+    };
+  }, [filteredPoints, thresholdMiles]);
 
   const outlierAnalysis = useMemo(() => {
     if (filteredPoints.length === 0) {
@@ -2122,6 +2229,72 @@ export default function ImpactScreen() {
         <Text style={[styles.helpText, { color: theme.mutedText }]}> 
           Coordinate cleanup applied: swapped pairs {coordinateQuality.swappedPairs}, scaled pairs {coordinateQuality.scaledPairs}.
         </Text>
+      ) : null}
+
+      {thresholdRecommendation ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <View style={styles.thresholdRecommendationHeader}>
+            <View style={styles.thresholdRecommendationCopy}>
+              <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Historical Threshold Recommendation</Text>
+              <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+                Built from {thresholdRecommendation.sampleSize} historical stops currently in scope (after WH/route/time filters).
+              </Text>
+              <Text style={[styles.selectionHint, { color: theme.subtleText }]}>{thresholdRecommendation.rationale}</Text>
+            </View>
+            <Pressable
+              onPress={() => setThresholdText(String(thresholdRecommendation.recommendedThresholdMiles))}
+              style={[styles.inlineSummaryButton, { backgroundColor: theme.accent, borderColor: theme.accent }]}
+            >
+              <Text style={styles.inlineSummaryPrimaryButtonText}>Apply Recommended Threshold</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.summaryMetricGrid}>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Current Threshold</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{thresholdMiles.toFixed(2)} mi</Text>
+              <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>
+                {thresholdRecommendation.currentThresholdFlaggedStops} flagged ({formatPct(thresholdRecommendation.currentThresholdFlaggedRate)})
+              </Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Recommended</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{thresholdRecommendation.recommendedThresholdMiles.toFixed(2)} mi</Text>
+              <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Balanced enforcement level</Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Guardrail</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{thresholdRecommendation.guardrailThresholdMiles.toFixed(2)} mi</Text>
+              <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Escalation threshold</Text>
+            </View>
+            <View style={[styles.summaryMetricCard, { backgroundColor: theme.metricBg, borderColor: theme.metricBorder }]}> 
+              <Text style={[styles.metricLabel, { color: theme.metricLabel }]}>Strict</Text>
+              <Text style={[styles.summaryMetricValue, { color: theme.metricValue }]}>{thresholdRecommendation.strictThresholdMiles.toFixed(2)} mi</Text>
+              <Text style={[styles.summaryMetricSub, { color: theme.subtleText }]}>Top-tail anomalies</Text>
+            </View>
+          </View>
+
+          <View style={styles.thresholdScenarioList}>
+            {thresholdRecommendation.scenarios.map((scenario) => (
+              <View
+                key={`threshold-scenario-${scenario.label}`}
+                style={[styles.thresholdScenarioRow, { borderColor: theme.cardBorder, backgroundColor: theme.inputBg }]}
+              >
+                <Text style={[styles.thresholdScenarioTitle, { color: theme.bodyText }]}>{scenario.label}: {scenario.thresholdMiles.toFixed(2)} mi</Text>
+                <Text style={[styles.thresholdScenarioMeta, { color: theme.mutedText }]}>
+                  {scenario.flaggedStops} stops ({formatPct(scenario.flaggedRate)}) | {scenario.impactedOffenders} routes ({formatPct(scenario.impactedOffenderRate)})
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Distribution checkpoints: p50 {thresholdRecommendation.p50Miles.toFixed(2)} mi, p80 {thresholdRecommendation.p80Miles.toFixed(2)} mi, p90 {thresholdRecommendation.p90Miles.toFixed(2)} mi, p95 {thresholdRecommendation.p95Miles.toFixed(2)} mi, IQR upper fence {thresholdRecommendation.iqrUpperFenceMiles.toFixed(2)} mi.</Text>
+        </View>
+      ) : filteredPoints.length > 0 ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Historical Threshold Recommendation</Text>
+          <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Need at least 20 filtered stops to generate stable threshold recommendations from historical behavior.</Text>
+        </View>
       ) : null}
 
       {outlierAnalysis.snapshot ? (
@@ -3453,6 +3626,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+  },
+  thresholdRecommendationHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  thresholdRecommendationCopy: {
+    flex: 1,
+    minWidth: 240,
+    gap: 4,
+  },
+  thresholdScenarioList: {
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  thresholdScenarioRow: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  thresholdScenarioTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  thresholdScenarioMeta: {
+    fontSize: 12,
+    lineHeight: 17,
   },
   summaryPopoutWrap: {
     position: 'absolute',
