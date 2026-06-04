@@ -171,6 +171,12 @@ type SamsaraVehicleRecord = {
 
 type SamsaraVehicleListResponse = {
   data?: SamsaraVehicleRecord[];
+  pagination?: {
+    endCursor?: string;
+    nextCursor?: string;
+    hasNextPage?: boolean;
+    hasNext?: boolean;
+  };
 };
 
 type SamsaraDriverRecord = {
@@ -1174,6 +1180,44 @@ async function fetchSamsaraDriverByUsername(proxyBase: string, username: string)
   } catch {
     return null;
   }
+}
+
+async function fetchAllSamsaraVehicles(proxyBase: string): Promise<SamsaraVehicleRecord[]> {
+  const allVehicles: SamsaraVehicleRecord[] = [];
+  let afterCursor: string | null = null;
+  const maxPages = 40;
+
+  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
+    const params = new URLSearchParams({ limit: '512' });
+    if (afterCursor) {
+      params.set('after', afterCursor);
+    }
+
+    const response = await fetch(`${proxyBase}/fleet/vehicles?${params.toString()}`);
+    if (!response.ok) {
+      const responseText = await response.text();
+      throw new Error(`Samsara vehicles lookup failed (${response.status}) via ${proxyBase}. ${responseText.slice(0, 140)}`.trim());
+    }
+
+    const payload = await response.json() as SamsaraVehicleListResponse;
+    const pageVehicles = Array.isArray(payload.data) ? payload.data : [];
+    allVehicles.push(...pageVehicles);
+
+    const nextCursor = payload.pagination?.endCursor ?? payload.pagination?.nextCursor ?? null;
+    const hasNextPage = Boolean(payload.pagination?.hasNextPage ?? payload.pagination?.hasNext);
+    if (!hasNextPage || !nextCursor || pageVehicles.length === 0) {
+      break;
+    }
+
+    afterCursor = nextCursor;
+  }
+
+  const deduped = new Map<string, SamsaraVehicleRecord>();
+  for (const vehicle of allVehicles) {
+    deduped.set(String(vehicle.id), vehicle);
+  }
+
+  return Array.from(deduped.values());
 }
 
 export default function ImpactScreen() {
@@ -2437,14 +2481,7 @@ export default function ImpactScreen() {
 
       for (const proxyBase of proxyBases) {
         try {
-          const vehiclesResponse = await fetch(`${proxyBase}/fleet/vehicles`);
-          if (!vehiclesResponse.ok) {
-            const responseText = await vehiclesResponse.text();
-            throw new Error(`Samsara vehicles lookup failed (${vehiclesResponse.status}) via ${proxyBase}. ${responseText.slice(0, 140)}`.trim());
-          }
-
-          const vehiclesPayload = await vehiclesResponse.json() as SamsaraVehicleListResponse;
-          const vehicles = Array.isArray(vehiclesPayload.data) ? vehiclesPayload.data : [];
+          const vehicles = await fetchAllSamsaraVehicles(proxyBase);
           const selectedRoute = selectedRouteSummary.offender.trim().toLowerCase();
           const normalizedRouteLabel = normalizeSearchToken(selectedRoute);
           const scoredMatches = vehicles
