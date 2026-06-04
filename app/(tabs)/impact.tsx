@@ -1664,40 +1664,41 @@ export default function ImpactScreen() {
     return offenderSummaries.find((summary) => summary.offender === selectedOffender) ?? offenderSummaries[0];
   }, [offenderSummaries, selectedOffender]);
 
-  const activeOffenderPoints = useMemo(() => {
+  const activeOffenderAllPoints = useMemo(() => {
     if (!activeOffenderSummary) {
       return [];
     }
 
     return filteredPoints
       .filter((point) => point.offender === activeOffenderSummary.offender)
-      .sort((left, right) => right.distanceMiles - left.distanceMiles)
-      .slice(0, 120);
+      .sort((left, right) => right.distanceMiles - left.distanceMiles);
   }, [activeOffenderSummary, filteredPoints]);
 
+  const activeOffenderPoints = useMemo(() => activeOffenderAllPoints.slice(0, 120), [activeOffenderAllPoints]);
+
   const activeTruckId = useMemo(() => {
-    const truckIds = Array.from(new Set(activeOffenderPoints.map((point) => point.truckId).filter((value): value is string => Boolean(value))));
+    const truckIds = Array.from(new Set(activeOffenderAllPoints.map((point) => point.truckId).filter((value): value is string => Boolean(value))));
     return truckIds.length === 1 ? truckIds[0] : null;
-  }, [activeOffenderPoints]);
+  }, [activeOffenderAllPoints]);
 
   const activeTruckName = useMemo(() => {
-    const truckNames = Array.from(new Set(activeOffenderPoints.map((point) => point.truckName).filter((value): value is string => Boolean(value))));
+    const truckNames = Array.from(new Set(activeOffenderAllPoints.map((point) => point.truckName).filter((value): value is string => Boolean(value))));
     return truckNames.length === 1 ? truckNames[0] : null;
-  }, [activeOffenderPoints]);
+  }, [activeOffenderAllPoints]);
 
   const activeDriverUsername = useMemo(() => {
-    const driverUsernames = Array.from(new Set(activeOffenderPoints.map((point) => point.driverUsername).filter((value): value is string => Boolean(value))));
+    const driverUsernames = Array.from(new Set(activeOffenderAllPoints.map((point) => point.driverUsername).filter((value): value is string => Boolean(value))));
     return driverUsernames.length === 1 ? driverUsernames[0] : null;
-  }, [activeOffenderPoints]);
+  }, [activeOffenderAllPoints]);
 
   const activeWarehouseIds = useMemo(
-    () => Array.from(new Set(activeOffenderPoints.map((point) => point.whId).filter((value): value is string => Boolean(value)))),
-    [activeOffenderPoints]
+    () => Array.from(new Set(activeOffenderAllPoints.map((point) => point.whId).filter((value): value is string => Boolean(value)))),
+    [activeOffenderAllPoints]
   );
 
   const activeTruckCandidates = useMemo(
-    () => Array.from(new Set(activeOffenderPoints.flatMap((point) => [point.truckName, point.truckId]).filter((value): value is string => Boolean(value?.trim())))),
-    [activeOffenderPoints]
+    () => Array.from(new Set(activeOffenderAllPoints.flatMap((point) => [point.truckId, point.truckName]).filter((value): value is string => Boolean(value?.trim())))),
+    [activeOffenderAllPoints]
   );
 
   const samsaraMinSpeedMph = useMemo(() => {
@@ -2420,7 +2421,15 @@ export default function ImpactScreen() {
       }
 
       const hasExplicitTruckKey = Boolean(activeTruckName || activeTruckId);
-      const truckLookupLabel = activeTruckName ?? activeTruckId ?? selectedRouteSummary.offender;
+      const truckLookupCandidates = Array.from(new Set([
+        activeTruckId,
+        activeTruckName,
+        ...activeTruckCandidates,
+        hasExplicitTruckKey ? null : selectedRouteSummary.offender,
+      ]
+        .map((value) => String(value ?? '').trim().toLowerCase())
+        .filter(Boolean)));
+      const truckLookupLabel = truckLookupCandidates[0] ?? selectedRouteSummary.offender;
       const expectedDriverUsername = activeDriverUsername?.trim() ?? '';
 
       const proxyBases = resolveSamsaraProxyBases();
@@ -2437,45 +2446,62 @@ export default function ImpactScreen() {
           const vehiclesPayload = await vehiclesResponse.json() as SamsaraVehicleListResponse;
           const vehicles = Array.isArray(vehiclesPayload.data) ? vehiclesPayload.data : [];
           const selectedRoute = selectedRouteSummary.offender.trim().toLowerCase();
-          const selectedTruckLabel = truckLookupLabel.trim().toLowerCase();
-          const normalizedTruckLabel = normalizeSearchToken(selectedTruckLabel);
           const normalizedRouteLabel = normalizeSearchToken(selectedRoute);
-          const vehicleMatch = vehicles.find((vehicle) => {
+          const scoredMatches = vehicles
+            .map((vehicle) => {
             const vehicleName = extractVehicleName(vehicle).toLowerCase();
             const vehicleIdText = String(vehicle.id).toLowerCase();
             const normalizedVehicleName = normalizeSearchToken(vehicleName);
             const normalizedVehicleId = normalizeSearchToken(vehicleIdText);
+            let bestScore = 0;
 
-            const truckExactMatch =
-              normalizedVehicleId === normalizedTruckLabel ||
-              normalizedVehicleName === normalizedTruckLabel;
+            truckLookupCandidates.forEach((candidate, index) => {
+              const normalizedCandidate = normalizeSearchToken(candidate);
+              const candidatePriority = Math.max(1, truckLookupCandidates.length - index);
 
-            const truckTokenMatch =
-              hasEquivalentToken(vehicleIdText, selectedTruckLabel) ||
-              hasEquivalentToken(vehicleName, selectedTruckLabel);
+              if (normalizedVehicleId === normalizedCandidate) {
+                bestScore = Math.max(bestScore, 130 + candidatePriority);
+              }
 
-            if (truckExactMatch || truckTokenMatch) {
-              return true;
+              if (normalizedVehicleName === normalizedCandidate) {
+                bestScore = Math.max(bestScore, 120 + candidatePriority);
+              }
+
+              if (hasEquivalentToken(vehicleIdText, candidate)) {
+                bestScore = Math.max(bestScore, 110 + candidatePriority);
+              }
+
+              if (hasEquivalentToken(vehicleName, candidate)) {
+                bestScore = Math.max(bestScore, 100 + candidatePriority);
+              }
+            });
+
+            if (!hasExplicitTruckKey) {
+              const routeExactMatch =
+                normalizedVehicleName === normalizedRouteLabel ||
+                normalizedVehicleId === normalizedRouteLabel;
+
+              if (routeExactMatch) {
+                bestScore = Math.max(bestScore, 30);
+              }
+
+              if (hasEquivalentToken(vehicleName, selectedRoute) || hasEquivalentToken(vehicleIdText, selectedRoute)) {
+                bestScore = Math.max(bestScore, 20);
+              }
             }
 
-            if (hasExplicitTruckKey) {
-              // If we already have a truck key from the uploaded file, never fall back to route-name fuzzy matching.
-              return false;
-            }
+            return {
+              vehicle,
+              score: bestScore,
+            };
+          })
+          .filter((entry) => entry.score > 0)
+          .sort((left, right) => right.score - left.score);
 
-            const routeExactMatch =
-              normalizedVehicleName === normalizedRouteLabel ||
-              normalizedVehicleId === normalizedRouteLabel;
-
-            const routeTokenMatch =
-              hasEquivalentToken(vehicleName, selectedRoute) ||
-              hasEquivalentToken(vehicleIdText, selectedRoute);
-
-            return routeExactMatch || routeTokenMatch;
-          });
+          const vehicleMatch = scoredMatches[0]?.vehicle ?? null;
 
           if (!vehicleMatch) {
-            throw new Error(`Could not find a Samsara vehicle that matches truck "${truckLookupLabel}" or route "${selectedRouteSummary.offender}".`);
+            throw new Error(`Could not find a Samsara vehicle that matches truck "${truckLookupCandidates.join(' / ')}" or route "${selectedRouteSummary.offender}".`);
           }
 
           const dayWindow = buildUtcDayWindow(activeRouteDate);
