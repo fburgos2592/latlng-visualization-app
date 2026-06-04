@@ -927,7 +927,11 @@ function parseWorkbookRows(buffer: ArrayBuffer): DataRow[] {
   }
 
   const sheet = workbook.Sheets[firstSheetName];
-  return XLSX.utils.sheet_to_json<DataRow>(sheet, { defval: '' });
+  return XLSX.utils.sheet_to_json<DataRow>(sheet, {
+    defval: '',
+    // Use formatted cell text (not raw numeric coercion) so route codes like 0123 stay intact.
+    raw: false,
+  });
 }
 
 function isSpreadsheetUpload(asset: DocumentPicker.DocumentPickerAsset): boolean {
