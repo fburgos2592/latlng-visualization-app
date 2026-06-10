@@ -1,6 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { formatEasternDateTime, formatSignedMinutes } from '@/lib/formatters';
+
 type DiscrepancyPoint = {
   id: string;
   invoiceLat: number;
@@ -142,26 +144,6 @@ function colorForMiles(miles: number): string {
   }
 
   return '#15803d';
-}
-
-function formatSignedMinutes(value: number): string {
-  const rounded = Math.round(value);
-  const sign = rounded > 0 ? '+' : '';
-  return `${sign}${rounded} min`;
-}
-
-function formatEasternDateTime(ms: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-    timeZoneName: 'short',
-  }).format(new Date(ms));
 }
 
 function colorForRiskBand(riskBand: 'low' | 'medium' | 'high'): string {

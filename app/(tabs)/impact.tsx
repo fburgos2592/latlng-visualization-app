@@ -5,6 +5,7 @@ import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, Text
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
+import { formatDateTimeLabel, formatEasternDateTime, formatSignedMinutes, formatWallClockFromSerial, parseTimeValue } from '@/lib/formatters';
 
 type DataRow = Record<string, unknown>;
 
@@ -644,93 +645,6 @@ function bearingDeltaDegrees(leftBearing: number, rightBearing: number): number 
   return raw > 180 ? 360 - raw : raw;
 }
 
-function parseTimeValue(value: unknown): number | null {
-  if (value == null) {
-    return null;
-  }
-
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    if (value > 20_000) {
-      return Math.round((value - 25569) * 86_400_000);
-    }
-
-    return Math.round(value);
-  }
-
-  const text = String(value).trim();
-  if (!text) {
-    return null;
-  }
-
-  const numericText = Number(text);
-  if (Number.isFinite(numericText) && text.match(/^\d+(\.\d+)?$/)) {
-    if (numericText > 20_000) {
-      return Math.round((numericText - 25569) * 86_400_000);
-    }
-
-    return Math.round(numericText);
-  }
-
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.getTime();
-  }
-
-  return null;
-}
-
-function formatSignedMinutes(value: number): string {
-  const rounded = Math.round(value);
-  const sign = rounded > 0 ? '+' : '';
-  return `${sign}${rounded} min`;
-}
-
-function formatEasternDateTime(ms: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-    timeZoneName: 'short',
-  }).format(new Date(ms));
-}
-
-function formatWallClockFromSerial(ms: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    timeZone: 'UTC',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  }).format(new Date(ms));
-}
-
-function formatDateTimeLabel(value: string | null, fallbackMs: number | null): string {
-  if (value && value.trim()) {
-    if (/^\d+(?:\.\d+)?$/.test(value.trim())) {
-      const parsedMs = parseTimeValue(value);
-      if (parsedMs != null) {
-        return formatWallClockFromSerial(parsedMs);
-      }
-    }
-
-    return value.trim();
-  }
-
-  if (fallbackMs != null) {
-    return formatWallClockFromSerial(fallbackMs);
-  }
-
-  return 'N/A';
-}
-
 function parseDateToIso(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -1248,6 +1162,11 @@ async function fetchAllSamsaraVehicles(proxyBase: string): Promise<SamsaraVehicl
   return Array.from(deduped.values());
 }
 
+function extractUniqueValue<T>(items: (T | null | undefined)[]): T | null {
+  const unique = Array.from(new Set(items.filter((v): v is T => v != null)));
+  return unique.length === 1 ? unique[0] : null;
+}
+
 export default function ImpactScreen() {
   const DiscrepancyMapWithOverlays = DiscrepancyMap as React.ComponentType<any>;
   const windowDimensions = useWindowDimensions();
@@ -1748,20 +1667,20 @@ export default function ImpactScreen() {
 
   const activeOffenderPoints = useMemo(() => activeOffenderAllPoints.slice(0, 120), [activeOffenderAllPoints]);
 
-  const activeTruckId = useMemo(() => {
-    const truckIds = Array.from(new Set(activeOffenderAllPoints.map((point) => point.truckId).filter((value): value is string => Boolean(value))));
-    return truckIds.length === 1 ? truckIds[0] : null;
-  }, [activeOffenderAllPoints]);
+  const activeTruckId = useMemo(
+    () => extractUniqueValue(activeOffenderAllPoints.map((point) => point.truckId)),
+    [activeOffenderAllPoints]
+  );
 
-  const activeTruckName = useMemo(() => {
-    const truckNames = Array.from(new Set(activeOffenderAllPoints.map((point) => point.truckName).filter((value): value is string => Boolean(value))));
-    return truckNames.length === 1 ? truckNames[0] : null;
-  }, [activeOffenderAllPoints]);
+  const activeTruckName = useMemo(
+    () => extractUniqueValue(activeOffenderAllPoints.map((point) => point.truckName)),
+    [activeOffenderAllPoints]
+  );
 
-  const activeDriverUsername = useMemo(() => {
-    const driverUsernames = Array.from(new Set(activeOffenderAllPoints.map((point) => point.driverUsername).filter((value): value is string => Boolean(value))));
-    return driverUsernames.length === 1 ? driverUsernames[0] : null;
-  }, [activeOffenderAllPoints]);
+  const activeDriverUsername = useMemo(
+    () => extractUniqueValue(activeOffenderAllPoints.map((point) => point.driverUsername)),
+    [activeOffenderAllPoints]
+  );
 
   const activeWarehouseIds = useMemo(
     () => Array.from(new Set(activeOffenderAllPoints.map((point) => point.whId).filter((value): value is string => Boolean(value)))),
