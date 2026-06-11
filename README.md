@@ -187,7 +187,7 @@ Optional future data source:
 - Large files are supported, but keeping only required columns improves parsing speed.
 - The compare view is best used with route/date/warehouse fields populated so the in-route URL can resolve correctly.
 
-## Recent Web Updates
+## Recent Web Updates (2026-06-11)
 
 - Impact hero was compacted to keep Filters and Upload actions in the same header row on desktop.
 - The WH_ID dropdown behavior was adjusted to avoid overlaying the Upload panel.
@@ -216,3 +216,6 @@ Optional future data source:
 - Coordinate parsing now handles Zebra or locale-driven decimal commas and alternate CSV delimiters more safely.
 - Upload now shows staged parsing progress so users can see when the file is being read and analyzed.
 - Deployment flow remains: push to `main`, then run `npm run deploy` to publish `dist` to `gh-pages`.
+- Over-Threshold Overview map added to the Impact tab: after upload and threshold configuration, a new map card shows every flagged stop across all routes simultaneously — no offender selection required.
+- Hover any mismatch line or dot on the map to see a full invoice detail popup: customer, route, driver, truck, WH, date, mismatch distance, invoice and arrived times, time delta, and both coordinate pairs.
+- Hover tooltip now uses sticky auto-direction rendering so the popup repositions above, below, or to the side when a marker is near the viewport edge.
