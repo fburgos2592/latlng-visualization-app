@@ -1386,11 +1386,6 @@ export default function ImpactScreen() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
   }, [thresholdText]);
 
-  const overThresholdPoints = useMemo(
-    () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles),
-    [filteredPoints, thresholdMiles]
-  );
-
   const lookbackHours = useMemo(() => {
     const parsed = Number(lookbackHoursText);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 48;
@@ -1586,6 +1581,11 @@ export default function ImpactScreen() {
       return normalizeSearchToken(offenderLabel).includes(normalizedNumericQuery);
     });
   }, [routeSearchQuery, whFilteredPoints]);
+
+  const overThresholdPoints = useMemo(
+    () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles),
+    [filteredPoints, thresholdMiles]
+  );
 
   const offenderSummaries = useMemo(() => {
     const grouped = new Map<string, { count: number; totalMiles: number; maxMiles: number; overThresholdCount: number }>();
