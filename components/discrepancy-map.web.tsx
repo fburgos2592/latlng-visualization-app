@@ -5,12 +5,16 @@ import { formatEasternDateTime, formatSignedMinutes } from '@/lib/formatters';
 
 type DiscrepancyPoint = {
   id: string;
+  rowIndex?: number;
   invoiceLat: number;
   invoiceLng: number;
   arrivedLat: number;
   arrivedLng: number;
   distanceMiles: number;
   offender: string;
+  driverUsername?: string | null;
+  truckId?: string | null;
+  truckName?: string | null;
   whId: string;
   invoiceId: string;
   customerName: string | null;
@@ -21,6 +25,7 @@ type DiscrepancyPoint = {
   invoiceTimeMs: number | null;
   arrivedTimeMs: number | null;
   timeDeltaMinutes: number | null;
+  dateLabel?: string | null;
 };
 
 type TripHistoryPoint = {
@@ -144,6 +149,36 @@ function colorForMiles(miles: number): string {
   }
 
   return '#15803d';
+}
+
+function buildInvoicePopupHtml(point: DiscrepancyPoint): string {
+  const customer = point.customerName ?? 'Unknown';
+  const timeDelta = point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A';
+  const truck = point.truckName ?? point.truckId ?? null;
+  const driver = point.driverUsername ?? null;
+  const mismatchColor = colorForMiles(point.distanceMiles);
+
+  const row = (label: string, value: string, color = '#0f172a', mono = false) =>
+    `<tr><td style="color:#64748b;padding:2px 10px 2px 0;white-space:nowrap;vertical-align:top;">${label}</td><td style="font-weight:600;color:${color};${mono ? 'font-family:monospace;font-size:11px;' : ''}">${value}</td></tr>`;
+
+  return [
+    `<div style="font-family:system-ui,sans-serif;font-size:12px;line-height:1.55;min-width:230px;max-width:300px;">`,
+    `<div style="font-weight:800;font-size:13px;margin-bottom:6px;color:#0f172a;border-bottom:1px solid #e2e8f0;padding-bottom:5px;">Invoice ${point.invoiceId}</div>`,
+    `<table style="border-collapse:collapse;width:100%;">`,
+    row('Customer', customer),
+    row('Route', point.offender),
+    driver ? row('Driver', driver) : '',
+    truck ? row('Truck', truck) : '',
+    row('WH', point.whId),
+    point.dateLabel ? row('Date', point.dateLabel) : '',
+    row('Mismatch', `${point.distanceMiles.toFixed(2)} mi`, mismatchColor),
+    row('Invoice time', point.invoiceTimeDisplay),
+    row('Arrived time', point.arrivedTimeDisplay),
+    row('Time delta', timeDelta),
+    row('Invoice coords', `${point.invoiceLat.toFixed(5)}, ${point.invoiceLng.toFixed(5)}`, '#475569', true),
+    row('Arrived coords', `${point.arrivedLat.toFixed(5)}, ${point.arrivedLng.toFixed(5)}`, '#475569', true),
+    `</table></div>`,
+  ].join('');
 }
 
 function colorForRiskBand(riskBand: 'low' | 'medium' | 'high'): string {
@@ -420,13 +455,12 @@ export default function DiscrepancyMap({
         const arrived: [number, number] = [point.arrivedLat, point.arrivedLng];
         const color = colorForMiles(point.distanceMiles);
         const customerLabel = point.customerName ?? 'Unknown customer';
-        const invoiceTimeLabel = point.invoiceTimeDisplay;
-        const arrivedTimeLabel = point.arrivedTimeDisplay;
-        const timeDeltaLabel = point.timeDeltaMinutes != null ? formatSignedMinutes(point.timeDeltaMinutes) : 'N/A';
         const isSelected = selectedPointId === point.id;
         const lineColor = isSelected ? '#2563eb' : color;
         const lineWeight = isSelected ? 6 : 3;
         const lineOpacity = isSelected ? 1 : 0.85;
+        const popupHtml = buildInvoicePopupHtml(point);
+        const hoverPopup = L.popup({ autoPan: false, closeButton: false }).setContent(popupHtml);
 
         L.polyline([invoice, arrived], {
           color: lineColor,
@@ -434,11 +468,9 @@ export default function DiscrepancyMap({
           opacity: lineOpacity,
           dashArray: '4 6',
         })
+          .on('mouseover', function(e: any) { hoverPopup.setLatLng(e.latlng).openOn(mapRef.current); })
+          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
-          .bindPopup(
-            `<strong>${activeOffender}</strong><br/>WH_ID: ${point.whId}<br/>Customer: ${customerLabel}<br/>Invoice: ${point.invoiceId}<br/>Distance mismatch: ${point.distanceMiles.toFixed(2)} mi<br/>Arrived time (ET): ${arrivedTimeLabel}<br/>Invoice time (ET): ${invoiceTimeLabel}<br/>Time delta (arrived - invoice): ${timeDeltaLabel}`
-          )
-          .bindTooltip(`${customerLabel} (${timeDeltaLabel})`, { permanent: false })
           .addTo(layerRef.current);
 
         L.circleMarker(invoice, {
@@ -448,6 +480,8 @@ export default function DiscrepancyMap({
           fillOpacity: 0.95,
           weight: 2,
         })
+          .on('mouseover', function() { hoverPopup.setLatLng(invoice).openOn(mapRef.current); })
+          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
           .bindTooltip('Invoice location', { permanent: false })
           .addTo(layerRef.current);
@@ -459,6 +493,8 @@ export default function DiscrepancyMap({
           fillOpacity: 0.98,
           weight: 2,
         })
+          .on('mouseover', function() { hoverPopup.setLatLng(arrived).openOn(mapRef.current); })
+          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
           .bindTooltip(`Arrived: ${customerLabel}`, { permanent: false })
           .addTo(layerRef.current);

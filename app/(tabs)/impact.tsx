@@ -1386,6 +1386,11 @@ export default function ImpactScreen() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
   }, [thresholdText]);
 
+  const overThresholdPoints = useMemo(
+    () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles),
+    [filteredPoints, thresholdMiles]
+  );
+
   const lookbackHours = useMemo(() => {
     const parsed = Number(lookbackHoursText);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 48;
@@ -3496,6 +3501,24 @@ export default function ImpactScreen() {
         <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
           <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Historical Threshold Recommendation</Text>
           <Text style={[styles.selectionHint, { color: theme.subtleText }]}>Need at least 20 filtered stops to generate stable threshold recommendations from historical behavior.</Text>
+        </View>
+      ) : null}
+
+      {overThresholdPoints.length > 0 ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>
+            Over-Threshold Overview — {overThresholdPoints.length} stop{overThresholdPoints.length === 1 ? '' : 's'} ≥ {thresholdMiles} mi
+          </Text>
+          <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+            All flagged stops across every route currently in scope. Hover any mismatch line or marker to see full invoice details.
+          </Text>
+          <View style={styles.mapMissionControlHost}>
+            <DiscrepancyMapWithOverlays
+              points={overThresholdPoints}
+              activeOffender="All routes"
+              compareSummary={null}
+            />
+          </View>
         </View>
       ) : null}
 
