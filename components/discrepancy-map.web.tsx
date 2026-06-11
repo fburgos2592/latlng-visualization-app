@@ -459,8 +459,8 @@ export default function DiscrepancyMap({
         const lineColor = isSelected ? '#2563eb' : color;
         const lineWeight = isSelected ? 6 : 3;
         const lineOpacity = isSelected ? 1 : 0.85;
-        const popupHtml = buildInvoicePopupHtml(point);
-        const hoverPopup = L.popup({ autoPan: false, closeButton: false }).setContent(popupHtml);
+        const tooltipHtml = buildInvoicePopupHtml(point);
+        const tooltipOpts = { sticky: true, direction: 'auto' as const, opacity: 1 };
 
         L.polyline([invoice, arrived], {
           color: lineColor,
@@ -468,9 +468,8 @@ export default function DiscrepancyMap({
           opacity: lineOpacity,
           dashArray: '4 6',
         })
-          .on('mouseover', function(e: any) { hoverPopup.setLatLng(e.latlng).openOn(mapRef.current); })
-          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
+          .bindTooltip(tooltipHtml, tooltipOpts)
           .addTo(layerRef.current);
 
         L.circleMarker(invoice, {
@@ -480,10 +479,8 @@ export default function DiscrepancyMap({
           fillOpacity: 0.95,
           weight: 2,
         })
-          .on('mouseover', function() { hoverPopup.setLatLng(invoice).openOn(mapRef.current); })
-          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
-          .bindTooltip('Invoice location', { permanent: false })
+          .bindTooltip(tooltipHtml, tooltipOpts)
           .addTo(layerRef.current);
 
         L.circleMarker(arrived, {
@@ -493,10 +490,8 @@ export default function DiscrepancyMap({
           fillOpacity: 0.98,
           weight: 2,
         })
-          .on('mouseover', function() { hoverPopup.setLatLng(arrived).openOn(mapRef.current); })
-          .on('mouseout', function() { mapRef.current.closePopup(hoverPopup); })
           .on('click', () => onPointSelect?.(point.id))
-          .bindTooltip(`Arrived: ${customerLabel}`, { permanent: false })
+          .bindTooltip(tooltipHtml, tooltipOpts)
           .addTo(layerRef.current);
 
         overviewBounds.extend(invoice);
