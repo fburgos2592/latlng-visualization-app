@@ -5,6 +5,7 @@ import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, Vi
 import * as XLSX from 'xlsx';
 
 import ParkingMap from '@/components/parking-map';
+import { useAppTheme } from '@/context/app-theme-context';
 
 type CsvRow = Record<string, unknown>;
 
@@ -389,7 +390,7 @@ export default function HomeScreen() {
   const [isSamsaraLoading, setIsSamsaraLoading] = useState(false);
   const [lookbackHoursText, setLookbackHoursText] = useState('48');
   const [truckProfile, setTruckProfile] = useState<TruckProfile>(DEFAULT_TRUCK_PROFILE);
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useAppTheme();
   const theme = darkMode ? dark : light;
 
   const lookbackHours = useMemo(() => {
