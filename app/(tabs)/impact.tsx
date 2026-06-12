@@ -5,6 +5,7 @@ import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, Text
 import * as XLSX from 'xlsx';
 
 import DiscrepancyMap from '@/components/discrepancy-map';
+import { useAppTheme } from '@/context/app-theme-context';
 import { formatDateTimeLabel, formatEasternDateTime, formatSignedMinutes, formatWallClockFromSerial, parseTimeValue } from '@/lib/formatters';
 
 type DataRow = Record<string, unknown>;
@@ -1216,7 +1217,7 @@ export default function ImpactScreen() {
   const [isTripOverlayVisible, setIsTripOverlayVisible] = useState(true);
   const [isTripDrawerOpen, setIsTripDrawerOpen] = useState(true);
   const [isStopDrawerOpen, setIsStopDrawerOpen] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useAppTheme();
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
   const [isMapMissionControlOpen, setIsMapMissionControlOpen] = useState(true);
   const [samsaraMinSpeedText, setSamsaraMinSpeedText] = useState('0');
