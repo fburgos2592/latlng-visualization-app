@@ -30,6 +30,8 @@ export default function TabLayout() {
           bottom: Platform.OS === 'web' ? 12 : 0,
           paddingTop: Platform.OS === 'web' ? 4 : 4,
           paddingBottom: tabBarBottomPadding,
+          backgroundColor: Colors[colorScheme ?? 'light'].background,
+          borderTopColor: colorScheme === 'dark' ? '#2d2d2d' : '#e2e8f0',
         },
         tabBarItemStyle: {
           paddingVertical: Platform.OS === 'web' ? 2 : 0,
