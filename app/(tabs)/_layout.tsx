@@ -8,10 +8,8 @@ import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Colors } from '@/constants/theme';
 import { useAppTheme } from '@/context/app-theme-context';
-import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const { darkMode } = useAppTheme();
   const insets = useSafeAreaInsets();
   const minBottomPadding = Platform.select({ ios: 16, android: 14, web: 30, default: 18 }) ?? 16;
@@ -21,7 +19,8 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
+        tabBarActiveTintColor: darkMode ? Colors.dark.tint : Colors.light.tint,
+        tabBarInactiveTintColor: darkMode ? Colors.dark.tabIconDefault : Colors.light.tabIconDefault,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarShowLabel: true,
@@ -32,7 +31,7 @@ export default function TabLayout() {
           bottom: Platform.OS === 'web' ? 12 : 0,
           paddingTop: Platform.OS === 'web' ? 4 : 4,
           paddingBottom: tabBarBottomPadding,
-          backgroundColor: darkMode ? '#151718' : Colors[colorScheme ?? 'light'].background,
+          backgroundColor: darkMode ? '#151718' : '#ffffff',
           borderTopColor: darkMode ? '#2d2d2d' : '#e2e8f0',
         },
         tabBarItemStyle: {
