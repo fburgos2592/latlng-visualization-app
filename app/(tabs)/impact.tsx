@@ -1229,6 +1229,7 @@ export default function ImpactScreen() {
   const [isStopDrawerOpen, setIsStopDrawerOpen] = useState(true);
   const { darkMode, setDarkMode } = useAppTheme();
   const [isSummaryDrawerOpen, setIsSummaryDrawerOpen] = useState(false);
+  const [expandedZips, setExpandedZips] = useState<Set<string>>(new Set());
   const [isMapMissionControlOpen, setIsMapMissionControlOpen] = useState(true);
   const [samsaraMinSpeedText, setSamsaraMinSpeedText] = useState('0');
   const [samsaraMovementFilter, setSamsaraMovementFilter] = useState<'all' | 'moving' | 'stopped'>('all');
@@ -3575,6 +3576,7 @@ export default function ImpactScreen() {
             Sorted by avg mismatch. "Systemic" means multiple routes are all missing in the same zip — likely a bad geocoded address, not a driver issue.
           </Text>
           <View style={styles.zipTableHeader}>
+            <View style={styles.zipColToggle} />
             <Text style={[styles.zipCol, styles.zipColZip, styles.zipHeaderText, { color: theme.mutedText }]}>Zip</Text>
             <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Stops</Text>
             <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Routes</Text>
@@ -3583,44 +3585,109 @@ export default function ImpactScreen() {
             <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Over thresh</Text>
             <Text style={[styles.zipCol, styles.zipColBadge, styles.zipHeaderText, { color: theme.mutedText }]}>Flag</Text>
           </View>
-          {zipCodeSummaries.map((summary) => (
-            <View
-              key={summary.zipCode}
-              style={[
-                styles.zipTableRow,
-                { borderBottomColor: theme.cardBorder },
-                summary.isSystemic ? { backgroundColor: darkMode ? '#3b1a1a' : '#fff1f2' } : null,
-              ]}
-            >
-              <Text style={[styles.zipCol, styles.zipColZip, styles.zipCellText, { color: theme.bodyText }]}>{summary.zipCode}</Text>
-              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.stopCount}</Text>
-              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.offenderCount}</Text>
-              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.averageMiles >= thresholdMiles ? '#dc2626' : theme.bodyText }]}>
-                {summary.averageMiles.toFixed(2)}
-              </Text>
-              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.maxMiles >= thresholdMiles * 2 ? '#dc2626' : theme.bodyText }]}>
-                {summary.maxMiles.toFixed(2)}
-              </Text>
-              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.overThresholdRate >= 0.5 ? '#f97316' : theme.bodyText }]}>
-                {summary.overThresholdCount} ({Math.round(summary.overThresholdRate * 100)}%)
-              </Text>
-              <View style={[styles.zipCol, styles.zipColBadge]}>
-                {summary.isSystemic ? (
-                  <View style={styles.zipBadgeSystemic}>
-                    <Text style={styles.zipBadgeText}>SYSTEMIC</Text>
+          {zipCodeSummaries.map((summary) => {
+            const isExpanded = expandedZips.has(summary.zipCode);
+            const zipStops = filteredPoints
+              .filter((p) => p.zipCode === summary.zipCode)
+              .sort((a, b) => b.distanceMiles - a.distanceMiles);
+            const rowBg = summary.isSystemic ? (darkMode ? '#3b1a1a' : '#fff1f2') : undefined;
+
+            return (
+              <View key={summary.zipCode} style={{ borderBottomWidth: 1, borderBottomColor: theme.cardBorder }}>
+                <Pressable
+                  onPress={() => setExpandedZips((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(summary.zipCode)) { next.delete(summary.zipCode); } else { next.add(summary.zipCode); }
+                    return next;
+                  })}
+                  style={[styles.zipTableRow, { borderBottomWidth: 0 }, rowBg ? { backgroundColor: rowBg } : null]}
+                >
+                  <View style={styles.zipColToggle}>
+                    <Text style={[styles.zipToggleIcon, { color: theme.accent }]}>{isExpanded ? '−' : '+'}</Text>
                   </View>
-                ) : summary.stopCount === 1 && summary.maxMiles >= thresholdMiles * 5 ? (
-                  <View style={styles.zipBadgeExtreme}>
-                    <Text style={styles.zipBadgeText}>BAD ZIP</Text>
+                  <Text style={[styles.zipCol, styles.zipColZip, styles.zipCellText, { color: theme.bodyText }]}>{summary.zipCode}</Text>
+                  <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.stopCount}</Text>
+                  <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.offenderCount}</Text>
+                  <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.averageMiles >= thresholdMiles ? '#dc2626' : theme.bodyText }]}>
+                    {summary.averageMiles.toFixed(2)}
+                  </Text>
+                  <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.maxMiles >= thresholdMiles * 2 ? '#dc2626' : theme.bodyText }]}>
+                    {summary.maxMiles.toFixed(2)}
+                  </Text>
+                  <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.overThresholdRate >= 0.5 ? '#f97316' : theme.bodyText }]}>
+                    {summary.overThresholdCount} ({Math.round(summary.overThresholdRate * 100)}%)
+                  </Text>
+                  <View style={[styles.zipCol, styles.zipColBadge]}>
+                    {summary.isSystemic ? (
+                      <View style={styles.zipBadgeSystemic}><Text style={styles.zipBadgeText}>SYSTEMIC</Text></View>
+                    ) : summary.stopCount === 1 && summary.maxMiles >= thresholdMiles * 5 ? (
+                      <View style={styles.zipBadgeExtreme}><Text style={styles.zipBadgeText}>BAD ZIP</Text></View>
+                    ) : summary.overThresholdRate >= 0.5 ? (
+                      <View style={styles.zipBadgeWarn}><Text style={styles.zipBadgeText}>WATCH</Text></View>
+                    ) : null}
                   </View>
-                ) : summary.overThresholdRate >= 0.5 ? (
-                  <View style={styles.zipBadgeWarn}>
-                    <Text style={styles.zipBadgeText}>WATCH</Text>
+                </Pressable>
+
+                {isExpanded ? (
+                  <View style={[styles.zipExpandPanel, { backgroundColor: darkMode ? '#1e293b' : '#f8fafc', borderTopColor: theme.cardBorder }]}>
+                    <View style={styles.zipExpandHeader}>
+                      <Text style={[styles.zipExpandTitle, { color: theme.bodyText }]}>
+                        {zipStops.length} stop{zipStops.length === 1 ? '' : 's'} in zip {summary.zipCode}
+                      </Text>
+                      <Pressable
+                        onPress={() => {
+                          const exportRows = zipStops.map((p) => ({
+                            'Zip Code': p.zipCode ?? '',
+                            'Invoice #': p.invoiceId,
+                            'Customer': p.customerName ?? '',
+                            'Route': p.offender,
+                            'Driver': p.driverUsername ?? '',
+                            'Truck': p.truckName ?? p.truckId ?? '',
+                            'WH': p.whId,
+                            'Date': p.dateLabel ?? '',
+                            'Mismatch (mi)': p.distanceMiles,
+                            'Invoice Time': p.invoiceTimeDisplay,
+                            'Arrived Time': p.arrivedTimeDisplay,
+                            'Time Delta (min)': p.timeDeltaMinutes != null ? Math.round(p.timeDeltaMinutes) : '',
+                            'Invoice Lat': p.invoiceLat,
+                            'Invoice Lng': p.invoiceLng,
+                            'Arrived Lat': p.arrivedLat,
+                            'Arrived Lng': p.arrivedLng,
+                          }));
+                          const wb = XLSX.utils.book_new();
+                          XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportRows), `Zip ${summary.zipCode}`);
+                          XLSX.writeFile(wb, `zip_${summary.zipCode}_stops.xlsx`);
+                        }}
+                        style={[styles.zipExportBtn, { backgroundColor: theme.accent }]}
+                      >
+                        <Text style={styles.zipExportBtnText}>Export to Excel</Text>
+                      </Pressable>
+                    </View>
+
+                    <View style={[styles.zipExpandTableHeader, { borderBottomColor: theme.cardBorder }]}>
+                      <Text style={[styles.zipExpandCol, styles.zipExpandColId, styles.zipHeaderText, { color: theme.mutedText }]}>Invoice #</Text>
+                      <Text style={[styles.zipExpandCol, styles.zipExpandColCustomer, styles.zipHeaderText, { color: theme.mutedText }]}>Customer</Text>
+                      <Text style={[styles.zipExpandCol, styles.zipExpandColRoute, styles.zipHeaderText, { color: theme.mutedText }]}>Route</Text>
+                      <Text style={[styles.zipExpandCol, styles.zipExpandColMi, styles.zipHeaderText, { color: theme.mutedText }]}>Mismatch</Text>
+                      <Text style={[styles.zipExpandCol, styles.zipExpandColDate, styles.zipHeaderText, { color: theme.mutedText }]}>Date</Text>
+                    </View>
+
+                    {zipStops.map((stop) => (
+                      <View key={stop.id} style={[styles.zipExpandRow, { borderBottomColor: theme.cardBorder }]}>
+                        <Text style={[styles.zipExpandCol, styles.zipExpandColId, styles.zipCellText, { color: theme.mutedText, fontSize: 11 }]} numberOfLines={1}>{stop.invoiceId}</Text>
+                        <Text style={[styles.zipExpandCol, styles.zipExpandColCustomer, styles.zipCellText, { color: theme.bodyText }]} numberOfLines={1}>{stop.customerName ?? '—'}</Text>
+                        <Text style={[styles.zipExpandCol, styles.zipExpandColRoute, styles.zipCellText, { color: theme.bodyText }]} numberOfLines={1}>{stop.offender}</Text>
+                        <Text style={[styles.zipExpandCol, styles.zipExpandColMi, styles.zipCellText, { color: stop.distanceMiles >= thresholdMiles ? '#dc2626' : theme.bodyText }]}>
+                          {stop.distanceMiles.toFixed(2)} mi
+                        </Text>
+                        <Text style={[styles.zipExpandCol, styles.zipExpandColDate, styles.zipCellText, { color: theme.mutedText, fontSize: 11 }]}>{stop.dateLabel ?? '—'}</Text>
+                      </View>
+                    ))}
                   </View>
                 ) : null}
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
       ) : null}
 
@@ -5426,13 +5493,23 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
+    alignItems: 'center',
   },
   zipTableRow: {
     flexDirection: 'row',
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderBottomWidth: 1,
     alignItems: 'center',
+  },
+  zipColToggle: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  zipToggleIcon: {
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 22,
   },
   zipCol: {
     paddingHorizontal: 4,
@@ -5455,6 +5532,62 @@ const styles = StyleSheet.create({
   zipCellText: {
     fontSize: 13,
     fontWeight: '600',
+  },
+  zipExpandPanel: {
+    borderTopWidth: 1,
+    paddingBottom: 8,
+  },
+  zipExpandHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  zipExpandTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  zipExportBtn: {
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  zipExportBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  zipExpandTableHeader: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+  },
+  zipExpandRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    alignItems: 'center',
+  },
+  zipExpandCol: {
+    paddingHorizontal: 4,
+  },
+  zipExpandColId: {
+    flex: 3,
+  },
+  zipExpandColCustomer: {
+    flex: 4,
+  },
+  zipExpandColRoute: {
+    flex: 2,
+  },
+  zipExpandColMi: {
+    flex: 2,
+  },
+  zipExpandColDate: {
+    flex: 2,
   },
   zipBadgeSystemic: {
     backgroundColor: '#dc2626',
