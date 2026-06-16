@@ -33,6 +33,7 @@ type DiscrepancyPoint = {
   arrivedTimeMs: number | null;
   timeDeltaMinutes: number | null;
   dateLabel: string | null;
+  zipCode: string | null;
 };
 
 type CompareSummary = {
@@ -63,6 +64,7 @@ type KeySelection = {
   invoiceTimeKey: string | null;
   arrivedTimeKey: string | null;
   dateKey: string | null;
+  zipCodeKey: string | null;
 };
 
 type OffenderSummary = {
@@ -328,6 +330,7 @@ const CUSTOMER_ALIASES = ['customer_name', 'customer', 'customername', 'account_
 const INVOICE_TIME_ALIASES = ['invoice_time', 'invoice_datetime', 'invoice_ts', 'scheduled_time', 'requested_time'];
 const ARRIVED_TIME_ALIASES = ['arrived_time', 'arrival_time', 'arrived_at', 'arrival_datetime', 'arrived_ts'];
 const DATE_ALIASES = ['date', 'invoice_date', 'service_date'];
+const ZIP_CODE_ALIASES = ['zip', 'zip_code', 'zipcode', 'postal_code', 'delivery_zip', 'ship_to_zip', 'zip_code_5', 'postalcode'];
 const OFFENDERS_PER_PAGE = 25;
 const SAMSARA_PROXY_PROD_BASE = 'https://latlng-visualization-app.onrender.com/samsara';
 
@@ -561,6 +564,7 @@ function detectKeys(rows: DataRow[]): KeySelection {
   const invoiceTimeKey = pickExactKey(allKeys, INVOICE_TIME_ALIASES) ?? pickContainsKey(allKeys, ['invoice_time', 'scheduled_time', 'requested_time']);
   const arrivedTimeKey = pickExactKey(allKeys, ARRIVED_TIME_ALIASES) ?? pickContainsKey(allKeys, ['arrived_time', 'arrival_time', 'arrived_at']);
   const dateKey = pickExactKey(allKeys, DATE_ALIASES) ?? pickContainsKey(allKeys, ['date']);
+  const zipCodeKey = pickExactKey(allKeys, ZIP_CODE_ALIASES) ?? pickContainsKey(allKeys, ['zip', 'postal']);
 
   return {
     invoiceLatKey,
@@ -577,6 +581,7 @@ function detectKeys(rows: DataRow[]): KeySelection {
     invoiceTimeKey,
     arrivedTimeKey,
     dateKey,
+    zipCodeKey,
   };
 }
 
@@ -610,6 +615,11 @@ function getThirdColumnValue(row: DataRow): unknown {
 function getFourthColumnValue(row: DataRow): unknown {
   const values = Object.values(row);
   return values.length > 3 ? values[3] : null;
+}
+
+function getTenthColumnValue(row: DataRow): unknown {
+  const values = Object.values(row);
+  return values.length > 9 ? values[9] : null;
 }
 
 function toRadians(value: number): number {
@@ -1458,6 +1468,8 @@ export default function ImpactScreen() {
       const dateBValue = getSecondColumnValue(row);
       const dateRaw = getField(row, keys.dateKey);
       const dateLabel = normalizeRouteDate(dateBValue) ?? normalizeRouteDate(dateRaw);
+      const zipRaw = getField(row, keys.zipCodeKey) ?? getTenthColumnValue(row);
+      const zipCode = String(zipRaw ?? '').trim() || null;
 
       acc.points.push({
         id: String(rowIndex),
@@ -1482,13 +1494,14 @@ export default function ImpactScreen() {
         arrivedTimeMs,
         timeDeltaMinutes,
         dateLabel,
+        zipCode,
       });
 
       return acc;
     }, { points: [], quality: initialQuality });
 
     return result;
-  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.driverUsernameKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.truckIdKey, keys.truckNameKey, keys.whIdKey, rows]);
+  }, [keys.arrivedLatKey, keys.arrivedLngKey, keys.arrivedTimeKey, keys.customerKey, keys.dateKey, keys.driverUsernameKey, keys.invoiceIdKey, keys.invoiceLatKey, keys.invoiceLngKey, keys.invoiceTimeKey, keys.offenderKey, keys.truckIdKey, keys.truckNameKey, keys.whIdKey, keys.zipCodeKey, rows]);
 
   const points = parsedPoints.points;
   const coordinateQuality = parsedPoints.quality;
@@ -1587,6 +1600,56 @@ export default function ImpactScreen() {
     () => filteredPoints.filter((point) => point.distanceMiles >= thresholdMiles),
     [filteredPoints, thresholdMiles]
   );
+
+  type ZipCodeSummary = {
+    zipCode: string;
+    stopCount: number;
+    offenderCount: number;
+    averageMiles: number;
+    maxMiles: number;
+    overThresholdCount: number;
+    overThresholdRate: number;
+    isSystemic: boolean;
+  };
+
+  const zipCodeSummaries = useMemo<ZipCodeSummary[]>(() => {
+    const grouped = new Map<string, { totalMiles: number; maxMiles: number; offenders: Set<string>; overThreshold: number; count: number }>();
+
+    for (const point of filteredPoints) {
+      if (!point.zipCode) {
+        continue;
+      }
+
+      const existing = grouped.get(point.zipCode) ?? { totalMiles: 0, maxMiles: 0, offenders: new Set(), overThreshold: 0, count: 0 };
+      existing.count += 1;
+      existing.totalMiles += point.distanceMiles;
+      existing.maxMiles = Math.max(existing.maxMiles, point.distanceMiles);
+      existing.offenders.add(point.offender);
+      if (point.distanceMiles >= thresholdMiles) {
+        existing.overThreshold += 1;
+      }
+
+      grouped.set(point.zipCode, existing);
+    }
+
+    return Array.from(grouped.entries())
+      .map(([zipCode, value]) => {
+        const averageMiles = value.totalMiles / value.count;
+        const overThresholdRate = value.overThreshold / value.count;
+        return {
+          zipCode,
+          stopCount: value.count,
+          offenderCount: value.offenders.size,
+          averageMiles,
+          maxMiles: value.maxMiles,
+          overThresholdCount: value.overThreshold,
+          overThresholdRate,
+          isSystemic: value.offenders.size >= 2 && overThresholdRate >= 0.5,
+        };
+      })
+      .filter((summary) => summary.stopCount >= 2)
+      .sort((a, b) => b.averageMiles - a.averageMiles);
+  }, [filteredPoints, thresholdMiles]);
 
   const offenderSummaries = useMemo(() => {
     const grouped = new Map<string, { count: number; totalMiles: number; maxMiles: number; overThresholdCount: number }>();
@@ -3505,6 +3568,58 @@ export default function ImpactScreen() {
         </View>
       ) : null}
 
+      {zipCodeSummaries.length > 0 ? (
+        <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>Zip Code Analysis — {zipCodeSummaries.length} zip{zipCodeSummaries.length === 1 ? '' : 's'} with ≥2 stops</Text>
+          <Text style={[styles.sectionCopy, { color: theme.mutedText }]}>
+            Sorted by avg mismatch. "Systemic" means multiple routes are all missing in the same zip — likely a bad geocoded address, not a driver issue.
+          </Text>
+          <View style={styles.zipTableHeader}>
+            <Text style={[styles.zipCol, styles.zipColZip, styles.zipHeaderText, { color: theme.mutedText }]}>Zip</Text>
+            <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Stops</Text>
+            <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Routes</Text>
+            <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Avg mi</Text>
+            <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Max mi</Text>
+            <Text style={[styles.zipCol, styles.zipColNum, styles.zipHeaderText, { color: theme.mutedText }]}>Over thresh</Text>
+            <Text style={[styles.zipCol, styles.zipColBadge, styles.zipHeaderText, { color: theme.mutedText }]}>Flag</Text>
+          </View>
+          {zipCodeSummaries.map((summary) => (
+            <View
+              key={summary.zipCode}
+              style={[
+                styles.zipTableRow,
+                { borderBottomColor: theme.cardBorder },
+                summary.isSystemic ? { backgroundColor: darkMode ? '#3b1a1a' : '#fff1f2' } : null,
+              ]}
+            >
+              <Text style={[styles.zipCol, styles.zipColZip, styles.zipCellText, { color: theme.bodyText }]}>{summary.zipCode}</Text>
+              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.stopCount}</Text>
+              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: theme.bodyText }]}>{summary.offenderCount}</Text>
+              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.averageMiles >= thresholdMiles ? '#dc2626' : theme.bodyText }]}>
+                {summary.averageMiles.toFixed(2)}
+              </Text>
+              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.maxMiles >= thresholdMiles * 2 ? '#dc2626' : theme.bodyText }]}>
+                {summary.maxMiles.toFixed(2)}
+              </Text>
+              <Text style={[styles.zipCol, styles.zipColNum, styles.zipCellText, { color: summary.overThresholdRate >= 0.5 ? '#f97316' : theme.bodyText }]}>
+                {summary.overThresholdCount} ({Math.round(summary.overThresholdRate * 100)}%)
+              </Text>
+              <View style={[styles.zipCol, styles.zipColBadge]}>
+                {summary.isSystemic ? (
+                  <View style={styles.zipBadgeSystemic}>
+                    <Text style={styles.zipBadgeText}>SYSTEMIC</Text>
+                  </View>
+                ) : summary.overThresholdRate >= 0.5 ? (
+                  <View style={styles.zipBadgeWarn}>
+                    <Text style={styles.zipBadgeText}>WATCH</Text>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {overThresholdPoints.length > 0 ? (
         <View style={[styles.card, { backgroundColor: theme.cardBg, borderColor: theme.cardBorder }]}>
           <Text style={[styles.sectionTitle, { color: theme.bodyText }]}>
@@ -5300,6 +5415,59 @@ const styles = StyleSheet.create({
   thresholdScenarioMeta: {
     fontSize: 12,
     lineHeight: 17,
+  },
+  zipTableHeader: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  zipTableRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    alignItems: 'center',
+  },
+  zipCol: {
+    paddingHorizontal: 4,
+  },
+  zipColZip: {
+    flex: 2,
+  },
+  zipColNum: {
+    flex: 2,
+  },
+  zipColBadge: {
+    flex: 2,
+    alignItems: 'flex-start',
+  },
+  zipHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  zipCellText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  zipBadgeSystemic: {
+    backgroundColor: '#dc2626',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  zipBadgeWarn: {
+    backgroundColor: '#f97316',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  zipBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '800',
   },
   mapMissionControlHost: {
     position: 'relative',
