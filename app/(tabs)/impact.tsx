@@ -1647,7 +1647,7 @@ export default function ImpactScreen() {
           isSystemic: value.offenders.size >= 2 && overThresholdRate >= 0.5,
         };
       })
-      .filter((summary) => summary.stopCount >= 2)
+      .filter((summary) => summary.stopCount >= 2 || summary.maxMiles >= thresholdMiles * 5)
       .sort((a, b) => b.averageMiles - a.averageMiles);
   }, [filteredPoints, thresholdMiles]);
 
@@ -3609,6 +3609,10 @@ export default function ImpactScreen() {
                   <View style={styles.zipBadgeSystemic}>
                     <Text style={styles.zipBadgeText}>SYSTEMIC</Text>
                   </View>
+                ) : summary.stopCount === 1 && summary.maxMiles >= thresholdMiles * 5 ? (
+                  <View style={styles.zipBadgeExtreme}>
+                    <Text style={styles.zipBadgeText}>BAD ZIP</Text>
+                  </View>
                 ) : summary.overThresholdRate >= 0.5 ? (
                   <View style={styles.zipBadgeWarn}>
                     <Text style={styles.zipBadgeText}>WATCH</Text>
@@ -5454,6 +5458,12 @@ const styles = StyleSheet.create({
   },
   zipBadgeSystemic: {
     backgroundColor: '#dc2626',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  zipBadgeExtreme: {
+    backgroundColor: '#7c3aed',
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
